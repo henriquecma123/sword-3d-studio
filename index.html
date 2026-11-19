@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sword 3D Studio</title>
+  <meta name="description" content="Product shots of Thrive Pad and Vision AI, from any angle." />
+  <meta name="theme-color" content="#f3f3f3" />
+  <meta property="og:title" content="Sword 3D Studio" />
+  <meta property="og:description" content="Product shots of Thrive Pad and Vision AI, from any angle." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://sword.3d-studio.workers.dev/" />
+  <meta property="og:site_name" content="Sword 3D Studio" />
+  <meta property="og:image" content="https://sword.3d-studio.workers.dev/assets/og-image.jpg?v=5" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Sword 3D Studio: the Vision AI phone and the Thrive Pad on the Sword gradient" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Sword 3D Studio" />
+  <meta name="twitter:description" content="Product shots of Thrive Pad and Vision AI, from any angle." />
+  <meta name="twitter:image" content="https://sword.3d-studio.workers.dev/assets/og-image.jpg?v=5" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0' stop-color='%23FF7E7E'/%3E%3Cstop offset='.5' stop-color='%23BE95E5'/%3E%3Cstop offset='1' stop-color='%234A89E8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='26' height='26' rx='8' fill='url(%23g)'/%3E%3Crect x='9' y='10' width='14' height='10' rx='2' fill='%23fff'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=Lora:wght@400;500;600&family=Montserrat:wght@500;600&display=swap" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+  <link rel="modulepreload" href="vendor/three.module.min.js" />
+  <link rel="modulepreload" href="vendor/OrbitControls.js" />
+  <link rel="modulepreload" href="geometry.js" />
+  <link rel="modulepreload" href="stand-mesher.js" />
+  <link rel="modulepreload" href="iphone.js" />
+  <link rel="modulepreload" href="box.js" />
+  <link rel="modulepreload" href="bands.js" />
+  <link rel="modulepreload" href="bands-light.js" />
+  <link rel="modulepreload" href="mband.js" />
+  <link rel="modulepreload" href="mband-weave.js" />
+  <link rel="modulepreload" href="yogablock.js" />
+  <link rel="modulepreload" href="screens.js" />
+  <link rel="modulepreload" href="scorebar.js" />
+  <link rel="modulepreload" href="phoneui.js" />
+  <link rel="modulepreload" href="phoenix.js" />
+  <link rel="preload" as="image" href="assets/screens/pad/13105-309.jpg" />
+  <link rel="preload" as="image" href="assets/logo.png" crossorigin="anonymous" />
+  <link rel="preload" as="image" href="assets/sword-logo.png" />
+</head>
+<body>
+  <main id="viewport">
+    <div class="glow" aria-hidden="true"></div>
+    <a class="logo" href="https://sword.com/" target="_blank" rel="noopener" aria-label="Sword (opens sword.com)">
+      <img src="assets/sword-logo.png" alt="Sword" width="130" height="32" />
+    </a>
+    <div id="stage"></div>
+    <div class="hint">Drag to rotate · Right-drag or ⇧-drag to pan · Scroll to zoom · Drop an image to put it on the screen</div>
+    <div id="busy" role="status" aria-live="polite"><div class="spinner"></div><span id="busy-text">Rendering…</span></div>
+  </main>
+
+  <aside id="panel">
+    <header class="brand">
+      <h1>Sword 3D Studio</h1>
+      <p>Studio-quality shots of our devices, from any angle.</p>
+    </header>
+
+    <div class="sections">
+      <section>
+        <h2>Device</h2>
+        <div class="devices" data-seg="device" role="radiogroup" aria-label="Device">
+          <button data-value="pad" class="on" role="radio">
+            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="3" y="4" width="42" height="28" rx="4" class="d-body" /><rect x="6" y="9" width="36" height="20" rx="1.5" class="d-screen" /><rect x="29" y="4" width="8" height="3.2" rx="1" class="d-cap" /></svg>
+            <span>Thrive Pad</span>
+          </button>
+          <button data-value="iphone" role="radio">
+            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="16" y="2" width="16" height="32" rx="4" class="d-body" /><rect x="17.6" y="3.6" width="12.8" height="28.8" rx="2.8" class="d-screen" /><rect x="21.5" y="5.2" width="5" height="1.6" rx=".8" class="d-island" /></svg>
+            <span>Vision AI</span>
+          </button>
+          <button data-value="box" role="radio">
+            <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M24 4.5 39.5 10.5V25.5L24 31.5 8.5 25.5V10.5Z" class="d-body" /><path d="M24 4.5 39.5 10.5 24 16.5 8.5 10.5Z" class="d-cap" /><path d="M24 16.5V31.5" class="d-line" /></svg>
+            <span>Box</span>
+          </button>
+          <button data-value="bands" role="radio">
+            <svg viewBox="0 0 48 36" aria-hidden="true"><ellipse cx="14" cy="18" rx="5.5" ry="14" class="d-band" /><ellipse cx="24" cy="18" rx="5.5" ry="14" class="d-band" /><ellipse cx="34" cy="18" rx="5.5" ry="14" class="d-band" /></svg>
+            <span>Bands</span>
+          </button>
+          <button data-value="mband" role="radio">
+            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="3.5" y="13" width="5.5" height="10" rx="2.2" class="d-line" /><rect x="7" y="14.5" width="38" height="7" rx="1.5" class="d-cap" /><rect x="12" y="11" width="13" height="14" rx="4" class="d-body" /></svg>
+            <span>M-Band</span>
+          </button>
+          <button data-value="block" role="radio">
+            <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M6 12 11 8H37L32 12Z" class="d-yb-top" /><path d="M4 14 9 10 11 8 6 12Z" class="d-yb-top" /><path d="M32 12 37 8 39 10 34 14Z" class="d-yb-bevel" /><path d="M34 14 39 10V27L34 31Z" class="d-yb-side" /><path d="M34 31 39 27 37 29 32 33Z" class="d-yb-under" /><path d="M6 12H32L34 14V31L32 33H6L4 31V14Z" class="d-yb-front" /><circle cx="12.4" cy="21.4" r="1.35" class="d-yb-ring" /><circle cx="12.4" cy="24.6" r="1.2" class="d-yb-ink" /><rect x="15.2" y="22.15" width="11.4" height="2.4" rx="1.2" class="d-yb-ink" /></svg>
+            <span>Yoga block</span>
+          </button>
+        </div>
+        <div id="bands-rows" class="hidden">
+          <div class="row">
+            <label>Bands</label>
+            <div class="band-picks" role="group" aria-label="Bands">
+              <button data-band="light" class="on" style="--c:#51b6e7" title="Light">Light</button>
+              <button data-band="medium" class="on" style="--c:#fecb0a" title="Medium">Medium</button>
+              <button data-band="heavy" class="on" style="--c:#f8b1b9" title="Heavy">Heavy</button>
+            </div>
+          </div>
+          <div class="row">
+            <label>Position</label>
+            <div class="seg" data-seg="bandpos">
+              <button data-value="floating">Floating</button>
+              <button data-value="surface" class="on">On a surface</button>
+            </div>
+          </div>
+          <div class="row hidden" id="band-shape-row">
+            <label>Shape</label>
+            <div class="seg" data-seg="bandshape">
+              <button data-value="loops" class="on" title="Open loops in the air, as in the brand's render">Loops</button>
+              <button data-value="hang" title="Hung over a hook">Hanging</button>
+              <button data-value="stretch" title="Stretched between two hooks">Stretched</button>
+            </div>
+          </div>
+          <div class="row" id="band-lay-row">
+            <label>Lay</label>
+            <div class="seg" data-seg="bandlay">
+              <button data-value="flat" class="on">Lying flat</button>
+              <button data-value="standing">Standing</button>
+            </div>
+          </div>
+          <div class="row">
+            <label>Front print</label>
+            <div class="seg" data-seg="bandprint">
+              <button data-value="label" class="on" title="The strength (Light ●○○, Medium ●●○, Heavy ●●●) in front, the Sword symbol on the back">Strength</button>
+              <button data-value="symbol" title="The Sword symbol in front, the strength on the back">Symbol</button>
+            </div>
+          </div>
+          <label class="check hidden" id="band-hooks-row"><input type="checkbox" id="band-hooks" /> Show the hooks in the image</label>
+          <button class="ghost" id="band-reset">Reset the shape</button>
+          <p class="note">Drag a band to pull it; hold ⇧ as you let go to pin it there. Drag a pin to move it, scroll over it to turn it (⇧-scroll twists it), double-click it to remove it. ⌥-drag moves a whole band.</p>
+        </div>
+        <div class="row" id="stand-row">
+          <label>Stand</label>
+          <div class="seg" data-seg="stand">
+            <button data-value="on" class="on">With stand</button>
+            <button data-value="off">No stand</button>
+          </div>
+        </div>
+        <div class="row hidden" id="pose-row">
+          <label>Pose</label>
+          <div class="seg" data-seg="pose">
+            <button data-value="upright" class="on">Upright</button>
+            <button data-value="flat">Lying flat</button>
+          </div>
+        </div>
+        <div class="row hidden" id="box-pose-row">
+          <label>Pose</label>
+          <div class="seg" data-seg="boxpose">
+            <button data-value="floating" class="on" title="Floating, as in the mockup">Floating</button>
+            <button data-value="resting" title="Lid up on the floor">Resting</button>
+          </div>
+        </div>
+        <div class="row hidden" id="mband-pose-row">
+          <label>Pose</label>
+          <div class="seg" data-seg="mbandpose">
+            <button data-value="worn" class="on" title="Closed, as if worn">Worn</button>
+            <button data-value="flat" title="Lying flat, the pod under the strap">Lying flat</button>
+            <button data-value="sensor" title="Turned over: the pod on top, its sensors up">Sensors up</button>
+          </div>
+        </div>
+        <div class="row hidden" id="block-pose-row">
+          <label>Pose</label>
+          <div class="seg" data-seg="blockpose">
+            <button data-value="standing" class="on" title="On its long side, the logo to the front, as in its renders">Standing</button>
+            <button data-value="flat" title="Lying flat, the logo up">Lying flat</button>
+            <button data-value="end" title="Standing tall on its end">On its end</button>
+          </div>
+        </div>
+        <div class="row hidden" id="finish-row">
+          <label>Finish <span id="finish-name" class="sub"></span></label>
+          <div class="finishes">
+            <button data-finish="white" title="White Titanium" aria-label="White Titanium" style="background:#e9e7e2"></button>
+            <button data-finish="natural" title="Natural Titanium" aria-label="Natural Titanium" style="background:#bdb6ac"></button>
+            <button data-finish="desert" title="Desert Titanium" aria-label="Desert Titanium" style="background:#c9ab90"></button>
+            <button data-finish="black" title="Black Titanium" aria-label="Black Titanium" style="background:#454443"></button>
+            <button data-finish="spaceblack" title="Space Black" aria-label="Space Black" style="background:#1e1e20"></button>
+            <button data-finish="deepblue" title="Deep Blue" aria-label="Deep Blue" style="background:#323a4d"></button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Camera</h2>
+        <div class="chips">
+          <button data-view="0,0">Front</button>
+          <button data-view="-32,14">¾ Left</button>
+          <button data-view="32,14">¾ Right</button>
+          <button data-view="40,32">Hero</button>
+          <button data-view="90,0">Side</button>
+          <button data-view="180,0">Back</button>
+          <button data-view="-145,16">¾ Back</button>
+          <button data-view="0,89">Top</button>
+          <button data-view="24,-6">Low</button>
+        </div>
+        <div class="slider"><label for="cam-az">Rotation <span id="cam-az-v"></span></label><input id="cam-az" type="range" min="-180" max="180" step="0.5" /></div>
+        <div class="slider"><label for="cam-el" title="The camera's angle round the device, from below to above">Angle <span id="cam-el-v"></span></label><input id="cam-el" type="range" min="-89" max="89" step="0.5" /></div>
+        <div class="slider"><label for="cam-lift" title="Raise or lower the camera, keeping its angle: the device moves down or up in the frame">Height <span id="cam-lift-v"></span></label><input id="cam-lift" type="range" min="-20" max="20" step="0.1" value="0" /></div>
+        <div class="slider"><label for="cam-dist">Distance <span id="cam-dist-v"></span></label><input id="cam-dist" type="range" min="8" max="400" step="0.5" /></div>
+        <div class="slider"><label for="focal">Lens <span id="focal-v"></span></label><input id="focal" type="range" min="24" max="200" step="1" /></div>
+        <button class="ghost" id="btn-fit">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" /></svg>
+          Re-center &amp; fit
+        </button>
+      </section>
+
+      <section>
+        <h2>Lighting</h2>
+        <div class="light-wrap">
+          <canvas id="lightpad" aria-label="Light position: drag to move the key light"></canvas>
+          <div class="light-sliders">
+            <div class="slider"><label for="light-az">Direction <span id="light-az-v"></span></label><input id="light-az" type="range" min="-180" max="180" step="1" /></div>
+            <div class="slider"><label for="light-el">Height <span id="light-el-v"></span></label><input id="light-el" type="range" min="5" max="90" step="1" /></div>
+          </div>
+        </div>
+        <div class="slider"><label for="key">Key light <span id="key-v"></span></label><input id="key" type="range" min="0" max="2" step="0.01" /></div>
+        <div class="slider"><label for="env">Ambient <span id="env-v"></span></label><input id="env" type="range" min="0.2" max="2" step="0.01" /></div>
+        <div class="slider"><label for="exposure">Exposure <span id="exposure-v"></span></label><input id="exposure" type="range" min="0.4" max="2" step="0.01" /></div>
+      </section>
+
+      <section>
+        <h2>Shadow <label class="switch" title="Show shadow"><input type="checkbox" id="shadow-on" checked aria-label="Show shadow" /><span></span></label></h2>
+        <div id="shadow-controls">
+          <div class="slider"><label for="shadow-strength">Strength <span id="shadow-strength-v"></span></label><input id="shadow-strength" type="range" min="0" max="1" step="0.01" /></div>
+          <div class="slider"><label for="shadow-soft">Softness <span id="shadow-soft-v"></span></label><input id="shadow-soft" type="range" min="0" max="1" step="0.01" /></div>
+          <div class="slider"><label for="floor-gap">Floor distance <span id="floor-gap-v"></span></label><input id="floor-gap" type="range" min="0" max="40" step="0.5" /></div>
+        </div>
+      </section>
+
+      <section id="screen-section">
+        <h2>Screen</h2>
+        <div class="seg wide screens">
+          <button data-screen="exercise" class="on">Exercise</button>
+          <button data-screen="off">Off</button>
+          <button data-screen="custom" class="hidden">Uploaded</button>
+        </div>
+        <div id="exercise-picker">
+          <div class="row stack">
+            <label>Person</label>
+            <div class="seg wide" data-pick="g">
+              <button data-value="f">Female</button>
+              <button data-value="m">Male</button>
+            </div>
+          </div>
+          <div class="row">
+            <label for="pick-ex">Exercise</label>
+            <div class="select"><select id="pick-ex"></select></div>
+          </div>
+          <div class="row stack">
+            <label>Age</label>
+            <div class="seg wide" data-pick="age">
+              <button data-value="any">Any</button>
+              <button data-value="18">18–34</button>
+              <button data-value="35">35–54</button>
+              <button data-value="55">55+</button>
+            </div>
+          </div>
+          <div class="row stack">
+            <label>Ethnicity</label>
+            <div class="seg wide" data-pick="eth">
+              <button data-value="any">Any</button>
+              <button data-value="c">Caucasian</button>
+              <button data-value="a">Afro-American</button>
+            </div>
+          </div>
+          <div class="thumbs-head"><span id="pick-count"></span></div>
+          <div class="thumbs" id="pick-thumbs" role="listbox" aria-label="Exercise screens"></div>
+          <div id="pad-controls">
+            <div class="slider"><label for="progress">Progress bar <span id="progress-v"></span></label><input id="progress" type="range" min="0" max="100" step="5" /></div>
+            <p class="note">The number above the bar follows the progress; at 100% it becomes ★ +5.</p>
+            <div class="field">
+              <label for="pill-msg">Phoenix message <span class="sub" id="pill-count"></span></label>
+              <div class="input-wrap">
+                <input id="pill-msg" type="text" maxlength="45" autocomplete="off" spellcheck="true" />
+                <button class="link" id="pill-reset" type="button">Reset</button>
+              </div>
+            </div>
+          </div>
+          <div id="phone-controls">
+            <div class="row stack">
+              <label>Arrows</label>
+              <div class="seg wide" data-pick="arrows">
+                <button data-value="white">White</button>
+                <button data-value="yellow">Yellow</button>
+                <button data-value="green">Green</button>
+              </div>
+            </div>
+            <div class="row stack" id="stage-row">
+              <label>Green stage</label>
+              <div class="seg wide" data-pick="stage">
+                <button data-value="g1">1</button>
+                <button data-value="g2">2</button>
+                <button data-value="g3">3</button>
+                <button data-value="full">Full</button>
+              </div>
+            </div>
+            <p class="note hidden" id="arrows-fixed">The arrows on this screen are custom artwork, so they stay as designed.</p>
+            <div class="slider"><label for="reps">Reps <span id="reps-v"></span></label><input id="reps" type="range" min="1" max="10" step="1" /></div>
+          </div>
+        </div>
+        <button class="dropzone" id="upload">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" /></svg>
+          <span><strong>Upload an image</strong><em>or drop it on the preview</em></span>
+        </button>
+        <input type="file" id="file" accept="image/*" hidden />
+        <div class="file-name" id="file-name"></div>
+        <div class="row">
+          <label>Fit</label>
+          <div class="seg" data-seg="fit">
+            <button data-value="cover" class="on">Fill</button>
+            <button data-value="contain">Fit</button>
+            <button data-value="stretch">Stretch</button>
+          </div>
+        </div>
+        <div class="slider"><label for="screen-bright">Brightness <span id="screen-bright-v"></span></label><input id="screen-bright" type="range" min="0.2" max="1.6" step="0.01" /></div>
+        <div class="slider"><label for="screen-reflect">Glass reflections <span id="screen-reflect-v"></span></label><input id="screen-reflect" type="range" min="0" max="1" step="0.01" /></div>
+      </section>
+
+      <section id="phoenix-section" class="hidden">
+        <h2>Phoenix message <label class="switch" title="Show the Phoenix message"><input type="checkbox" id="phx-on" aria-label="Show the Phoenix message" /><span></span></label></h2>
+        <div id="phx-controls" class="disabled">
+          <div class="row">
+            <label>Bubbles</label>
+            <div class="seg" data-seg="phx-count">
+              <button data-value="1">1</button>
+              <button data-value="2" class="on">2</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="phx-1">Bubble 1 <span class="sub" id="phx-1-count"></span></label>
+            <div class="input-wrap"><input id="phx-1" type="text" maxlength="55" autocomplete="off" spellcheck="true" /></div>
+          </div>
+          <div class="field" id="phx-2-field">
+            <label for="phx-2">Bubble 2 <span class="sub" id="phx-2-count"></span></label>
+            <div class="input-wrap"><input id="phx-2" type="text" maxlength="55" autocomplete="off" spellcheck="true" /></div>
+          </div>
+          <div class="row">
+            <label>Position</label>
+            <div class="seg" data-seg="phx-side">
+              <button data-value="left">Left</button>
+              <button data-value="center">Centre</button>
+              <button data-value="right" class="on">Right</button>
+            </div>
+          </div>
+          <div class="slider"><label for="phx-y">Height <span id="phx-y-v"></span></label><input id="phx-y" type="range" min="-15" max="115" step="1" /></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Background</h2>
+        <div class="row">
+          <div class="swatches">
+            <button data-bg="#ffffff" title="White" aria-label="White" style="background:#ffffff"></button>
+            <button data-bg="#fafafa" title="Grey 50" aria-label="Grey 50" style="background:#fafafa"></button>
+            <button data-bg="#f3f3f3" title="Grey 100" aria-label="Grey 100" style="background:#f3f3f3"></button>
+            <button data-bg="#e8e8e8" title="Grey 200" aria-label="Grey 200" style="background:#e8e8e8"></button>
+            <button data-bg="#2e2e2e" title="Grey 800" aria-label="Grey 800" style="background:#2e2e2e"></button>
+            <button data-bg="#0d0d0d" title="Grey 900" aria-label="Grey 900" style="background:#0d0d0d"></button>
+          </div>
+          <label class="color-pick" title="Custom colour"><input type="color" id="bg" value="#ffffff" aria-label="Custom background colour" /></label>
+        </div>
+        <label class="check" id="transparent-row"><input type="checkbox" id="transparent" /> Transparent background <span class="sub">PNG only</span></label>
+      </section>
+
+      <section>
+        <h2>Export</h2>
+        <div class="row">
+          <label>Aspect</label>
+          <div class="seg small" data-seg="aspect">
+            <button data-value="16:9" class="on">16:9</button>
+            <button data-value="3:2">3:2</button>
+            <button data-value="4:3">4:3</button>
+            <button data-value="1:1">1:1</button>
+            <button data-value="4:5">4:5</button>
+            <button data-value="9:16">9:16</button>
+          </div>
+        </div>
+        <div class="row">
+          <label for="resolution">Size</label>
+          <div class="select"><select id="resolution">
+            <option value="1920">HD · 1920 px</option>
+            <option value="3840">4K · 3840 px</option>
+            <option value="5760" selected>6K · 5760 px</option>
+            <option value="7680">8K · 7680 px</option>
+          </select></div>
+        </div>
+        <div class="row">
+          <label>Format</label>
+          <div class="seg" data-seg="format">
+            <button data-value="png" class="on">PNG</button>
+            <button data-value="jpg">JPG</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="export-bar">
+      <div class="export-info" id="export-info"></div>
+      <button class="primary" id="download">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0-4-4m4 4 4-4M4 16h12" /></svg>
+        Download image
+      </button>
+    </footer>
+  </aside>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
