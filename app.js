@@ -10,6 +10,7 @@ import { BLOCK, createBlockMaterials, buildBlock, poseBlock, setBlockFloor } fro
 import { createBloomMaterials, buildBloom, setBloomFloor, setBloomLight } from './bloompod.js';
 import { createScaleMaterials, buildScale, setScaleReading } from './scale.js';
 import { BP_PRESETS, createBPMaterials, buildBPMonitor, poseBPMonitor, setBPReading, visibleBox } from './bpmonitor.js';
+import { GL_PRESETS, createGlucoMaterials, buildGlucometer, poseGlucometer, setGlucoReading } from './glucometer.js';
 import { studioLight, installCameraCurve } from './bands-light.js';
 import { PAD_SCREENS, PHONE_SCREENS, EXERCISES, VERSION } from './screens.js';
 import { drawScoreBar, drawPill, PILL_MAX, scoreBarFonts } from './scorebar.js';
@@ -27,11 +28,15 @@ const MAX_CANVAS_AREA = IS_IOS ? 16777216 : 268435456; // iOS Safari caps canvas
 
 // ---------------------------------------------------------------- state
 const state = {
-  device: 'pad',              // pad | iphone | box | bands | mband | block (the yoga block) | bloom (the Bloom pod) | scale | bp (the blood pressure monitor)
+  device: 'pad',              // pad | iphone | box | bands | mband | block (the yoga block) | bloom (the Bloom pod) | scale | bp (the blood pressure monitor) | gluco (the glucometer)
   boxPose: 'floating',        // box: floating (as in the mockup) | resting (lid up on the floor)
   mbandPose: 'worn',          // M-Band: worn (closed in a loop) | flat (lying flat) | sensor (turned over, sensors up)
   bpCuff: true,               // its cuff and tube (standing: the cuff upright behind it; lying: the cuff on its side)
   bpPose: 'standing',         // the blood pressure monitor: standing (leaning back a little) | lying (face up)
+  glPose: 'upright',          // the glucometer: upright (leaning back a little) | lying (face up)
+  glStrip: true,              // its test strip in the slot
+  glLean: 10,                 // upright: how far it leans back (degrees; negative leans forward)
+  glReading: 'normal',        // its LCD: normal (108) | high (212) | low (64) | custom (the fields)
   bpReading: 'high',          // its LCD: high (138/88) | low (105/68) | custom (the fields)
   scaleReading: '185.0',      // the scale's display: any digits, one decimal point
   bloomLight: false,          // Bloom pod: its light on or off (the renders show both)
@@ -118,12 +123,15 @@ SCM.onChange = () => requestRender();   // the logo's mask arrives a moment late
 const BPM = createBPMaterials(maxAniso);   // the blood pressure monitor: built in code from its product images (bpmonitor.js)
 const bp = buildBPMonitor(BPM);
 BPM.onChange = () => requestRender();
+const GLM = createGlucoMaterials(maxAniso);   // the glucometer: built in code from its product images (glucometer.js)
+const gluco = buildGlucometer(GLM);
+GLM.onChange = () => requestRender();
 const model = new THREE.Group();
 // the resistance bands: simulated (bands.js); their pin handles show on screen only
 const bandsRig = new BandsRig(maxAniso);
 await bandsRig.init();
 bandsRig.camera = camera;   // prints are turned to the camera once a preset settles
-model.add(tablet, stand, phone, box, mband, block, bloom, scale, bp, bandsRig.group);
+model.add(tablet, stand, phone, box, mband, block, bloom, scale, bp, gluco, bandsRig.group);
 scene.add(model, bandsRig.helpers);
 const isPhone = () => state.device === 'iphone';
 const isPad = () => state.device === 'pad';
@@ -133,6 +141,7 @@ const isBlock = () => state.device === 'block';
 const isBloom = () => state.device === 'bloom';
 const isScale = () => state.device === 'scale';
 const isBP = () => state.device === 'bp';
+const isGluco = () => state.device === 'gluco';
 const isBands = () => state.device === 'bands';
 // the hooks can be shown in the image only for the shapes that hang on them (Hanging, Stretched); the tick is kept
 // for when one is picked again
@@ -207,6 +216,15 @@ function poseMBandStudio() {
   mband.position.set(-c.x, -b.min.y + 0.001, -c.z);
 }
 
+// the glucometer: upright or lying, on the floor
+function poseGlucoStudio() {
+  poseGlucometer(gluco, state.glPose, state.glStrip, state.glLean);
+  gluco.position.set(0, 0, 0);
+  gluco.updateMatrixWorld(true);
+  const b = visibleBox(gluco), c = b.getCenter(new THREE.Vector3());
+  gluco.position.set(-c.x, -b.min.y + 0.001, -c.z);
+}
+
 // the blood pressure monitor: standing or lying, on the floor
 function poseBPStudio() {
   poseBPMonitor(bp, state.bpPose, state.bpCuff, BPM);
@@ -259,11 +277,12 @@ function applyPose() {
   bloom.visible = isBloom();
   scale.visible = isScale();
   bp.visible = isBP();
+  gluco.visible = isGluco();
   bandsRig.group.visible = isBands(); applyBandAids();
   stand.visible = isPad() && state.stand;
   tablet.rotation.set(0, 0, 0);
   const mbFlat = isMBand() && state.mbandPose !== 'worn';
-  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : isScale() ? 22 : isBP() ? 12 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : isScale() ? 150 : isBP() ? 90 : 140);
+  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : isScale() ? 22 : isBP() ? 12 : isGluco() ? 6 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : isScale() ? 150 : isBP() ? 90 : isGluco() ? 60 : 140);
   if (isBands()) {
     // the bands pose themselves (the simulation); a new preset is built by setupBands()
   } else if (isMBand()) {
@@ -274,6 +293,8 @@ function applyPose() {
     poseBloomStudio();
   } else if (isScale()) {
     poseScaleStudio();
+  } else if (isGluco()) {
+    poseGlucoStudio();
   } else if (isBP()) {
     poseBPStudio();
   } else if (isBox()) {
@@ -301,7 +322,7 @@ function applyPose() {
 // distance, starting where the pose puts it: on the floor, or the box floating at its mockup's height
 const floorGaps = {};
 let floorRange = null;   // its slider (bound with the other shadow controls)
-const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isScale() ? 'scale' : isBP() ? `bp:${state.bpPose}` : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
+const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isScale() ? 'scale' : isBP() ? `bp:${state.bpPose}` : isGluco() ? `gluco:${state.glPose}` : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
 function setFloor(fromPose) {
   if (isBands()) {
     // the bands' floor is their simulation's: fixed at y = 0. The slider sets how high the floating presets hang
@@ -331,6 +352,7 @@ function modelBounds() {
   if (isBloom()) return new THREE.Box3().setFromObject(bloom);
   if (isScale()) return new THREE.Box3().setFromObject(scale);
   if (isBP()) return visibleBox(bp);
+  if (isGluco()) return visibleBox(gluco);
   if (isBands()) { const b = bandsRig.bounds(); return b.isEmpty() ? new THREE.Box3(new THREE.Vector3(-10, 0, -10), new THREE.Vector3(10, 20, 10)) : b; }
   const bb = new THREE.Box3().setFromObject(tablet);
   if (state.stand) bb.expandByObject(stand);
@@ -383,7 +405,7 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 // the studio environment as reflections. The scale's glass is near a mirror: at the generator's own 256 px the
 // overhead light's edge showed in it as steps, so for the scale it is first rendered into a 1024 px cube
 function envFrom(env) {
-  if (!isScale() && !isBP()) return pmrem.fromScene(env, 0.0, 1, 1000);   // the BP monitor's glossy black face too
+  if (!isScale() && !isBP() && !isGluco()) return pmrem.fromScene(env, 0.0, 1, 1000);   // the BP monitor's glossy black face too
   const rt = new THREE.WebGLCubeRenderTarget(1024, { type: THREE.HalfFloatType });
   new THREE.CubeCamera(1, 1000, rt).update(renderer, env);
   const out = pmrem.fromCubemap(rt.texture); rt.dispose();
@@ -425,7 +447,9 @@ const LIGHTING = { default: { room: [0.16, 0.30, 0.62], key: 1 },
   // the scale, as in its product shot: a bright studio over it (the glass mirrors a large, soft overhead light)
   scale: { room: [0.62, 0.5, 0.3], key: 0.9, fill: 1.1, scrim: 0.8 },
   // the blood pressure monitor, as in its product shots: a bright, even white studio, the key soft and high
-  bp: { room: [0.7, 0.62, 0.42], key: 0.8, fill: 1.2, scrim: 0.9 } };
+  bp: { room: [0.7, 0.62, 0.42], key: 0.8, fill: 1.2, scrim: 0.9 },
+  // the glucometer: the same bright, even white studio as its product shots
+  gluco: { room: [0.7, 0.62, 0.42], key: 0.8, fill: 1.2, scrim: 0.9 } };
 const lighting = () => LIGHTING[state.device in LIGHTING ? state.device : 'default'];
 
 function buildEnvironment() {
@@ -826,6 +850,8 @@ function frameBloom() {
   frame(-36, 5);
 }
 // the blood pressure monitor: standing from the front right (its USB side), a little above (as ref-1); lying from the left, higher (ref-2)
+// the glucometer: upright from the front right, a little above (as its three-quarter shots); lying from above
+function frameGluco() { if (state.glPose === 'lying') frame(-20, 45); else frame(22, 12); }
 function frameBP() { if (state.bpPose === 'lying') frame(-30, 32); else frame(25, 10); }
 // the scale: its three-quarter shot's camera (a 55 mm lens from the front left, well above: fitted to the shot's
 // silhouette)
@@ -925,16 +951,25 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
     // the Bloom pod's renders are lit from above and the front left: the tops of the pod and the tail bright, their
     // undersides a deeper lilac
     if (v === 'bloom' && !bloomLit) { bloomLit = true; state.lightAz = -50; state.lightEl = 62; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
+    if (v === 'gluco' && !glLit) { glLit = true; state.lightAz = -30; state.lightEl = 55; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'bp' && !bpLit) { bpLit = true; state.lightAz = -30; state.lightEl = 55; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'scale' && !scaleLit) { scaleLit = true; state.lightAz = -35; state.lightEl = 58; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'bands' && !bandsRig.meshes.length) setupBands(false);
     syncSetupUI(); applyPose(); updateLights(); drawLightPad();
-    if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else frame(32, 14);
+    if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else if (v === 'gluco') frameGluco(); else frame(32, 14);
     renderPicker();
     if (screenPreset === 'exercise') setScreenPreset('exercise'); else updateScreen();
   }
   if (name === 'boxpose') { state.boxPose = v; applyPose(); updateLights(); frameBox(); }
   if (name === 'mbandpose') { state.mbandPose = v; applyPose(); updateLights(); frameMBand(); }
+  if (name === 'glpose') { state.glPose = v; syncSetupUI(); applyPose(); updateLights(); frameGluco(); }
+  if (name === 'glstrip') { state.glStrip = v === 'with'; applyPose(); updateLights(); requestRender(); }
+  if (name === 'glreading') {
+    state.glReading = v; $('#gl-custom-row').classList.toggle('hidden', v !== 'custom');
+    if (v !== 'custom') { const R = GL_PRESETS[v]; setGlucoReading(GLM, R); for (const k of ['value', 'time', 'date']) $('#gl-' + k).value = R[k]; }
+    else glFromFields();
+    requestRender();
+  }
   if (name === 'bpcuff') { state.bpCuff = v === 'with'; applyPose(); updateLights(); frameBP(); }
   if (name === 'bppose') { state.bpPose = v; syncSetupUI(); applyPose(); updateLights(); frameBP(); }
   if (name === 'bpreading') {
@@ -963,6 +998,15 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
   if (name === 'aspect') { state.aspect = v; limitResolutions(); resize(); }
 }));
 
+// the glucometer's custom reading: its fields shown on the LCD as you type
+function glFromFields() {
+  const v = (k, re, max) => ($('#gl-' + k).value || '').replace(re, '').slice(0, max);
+  setGlucoReading(GLM, { value: v('value', /[^0-9]/g, 3), time: v('time', /[^0-9:]/g, 5), date: v('date', /[^0-9-]/g, 5) }); requestRender();
+}
+for (const k of ['value', 'time', 'date']) document.getElementById('gl-' + k).addEventListener('input', () => {
+  if (state.glReading !== 'custom') { state.glReading = 'custom'; setSeg('glreading', 'custom'); }
+  glFromFields();
+});
 // the monitor's custom reading: its fields shown on the LCD as you type
 function bpFromFields() {
   const v = (k, max) => ($('#bp-' + k).value || '').replace(k === 'time' ? /[^0-9:]/g : /[^0-9]/g, '').slice(0, max);
@@ -978,11 +1022,16 @@ for (const k of ['sys', 'dia', 'pulse', 'time']) document.getElementById('bp-' +
 function syncSetupUI() {
   const ph = isPhone();
   $('#stand-row').classList.toggle('hidden', !isPad());
-  $('#pose-row').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || (isPad() && state.stand));
+  $('#pose-row').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || isGluco() || (isPad() && state.stand));
   $('#mband-pose-row').classList.toggle('hidden', !isMBand());
   $('#block-pose-row').classList.toggle('hidden', !isBlock());
   $('#bloom-light-row').classList.toggle('hidden', !isBloom());
   $('#scale-reading-row').classList.toggle('hidden', !isScale());
+  $('#gl-pose-row').classList.toggle('hidden', !isGluco());
+  $('#gl-lean-row').classList.toggle('hidden', !isGluco() || state.glPose !== 'upright');
+  $('#gl-strip-row').classList.toggle('hidden', !isGluco());
+  $('#gl-reading-row').classList.toggle('hidden', !isGluco());
+  $('#gl-custom-row').classList.toggle('hidden', !isGluco() || state.glReading !== 'custom');
   $('#bp-pose-row').classList.toggle('hidden', !isBP());
   $('#bp-cuff-row').classList.toggle('hidden', !isBP());
   $('#bp-reading-row').classList.toggle('hidden', !isBP());
@@ -998,7 +1047,7 @@ function syncSetupUI() {
   document.querySelectorAll('[data-band]').forEach((b) => b.classList.toggle('on', bandsRig.opts.on[b.dataset.band]));
   { const o = bandsRig.opts; setSeg('bandpos', o.pos); setSeg('bandshape', o.shape); setSeg('bandlay', o.lay); setSeg('bandprint', o.print); setSeg('bandpouch', o.pouch ? 'with' : 'without'); $('#band-hooks').checked = bandHooksWanted; }
   $('#band-hooks-row').classList.toggle('hidden', !bandHooksAllowed());   // only hung and stretched bands have hooks to show
-  $('#screen-section').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP());   // the box, the bands, the M-Band and the block have no screen
+  $('#screen-section').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || isGluco());   // the box, the bands, the M-Band and the block have no screen
   $('#finish-row').classList.toggle('hidden', !ph);
   $('#phoenix-section').classList.toggle('hidden', !ph);
   phx.group.visible = ph && state.phoenix.on;
@@ -1013,7 +1062,7 @@ document.querySelectorAll('[data-finish]').forEach((b) => b.addEventListener('cl
 }));
 
 // lighting
-let envTimer = 0, mbandLit = false, bloomLit = false, scaleLit = false, bpLit = false;
+let envTimer = 0, mbandLit = false, bloomLit = false, scaleLit = false, bpLit = false, glLit = false;
 // the box's mockup is lit by a key high on the front right (the direction of its floor shadow); its floor shadow is
 // darker and a little crisper than the studio's default; its lens is set by its framing
 let boxLook = { az: BOX_SCENE.key[0], el: BOX_SCENE.key[1], strength: 0.92, soft: 0.35 }, otherLook = null;
@@ -1043,6 +1092,7 @@ function lightChanged() {
 const lAz = bindRange('light-az', 'lightAz', deg, lightChanged);
 const lEl = bindRange('light-el', 'lightEl', deg, lightChanged);
 bindRange('key', 'keyIntensity', pct, lightChanged);
+bindRange('gl-lean', 'glLean', deg, () => { applyPose(); updateLights(); requestRender(); });   // the glucometer's lean, upright
 bindRange('env', 'envIntensity', pct, (v) => { scene.environmentIntensity = v; requestRender(); });
 bindRange('exposure', 'exposure', (v) => v.toFixed(2), (v) => { renderer.toneMappingExposure = v; requestRender(); });
 
@@ -1203,7 +1253,7 @@ async function setScreenPreset(name) {
   if (name === 'off') screenSource = null;
   else if (name === 'exercise') {
     const dev = state.device;
-    if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp') return;
+    if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;
     const src = dev === 'pad' ? await padExerciseSource() : await phoneExerciseSource();
     if (!src || screenPreset !== 'exercise' || state.device !== dev) return; // changed while loading
     screenSource = src;
@@ -1238,8 +1288,8 @@ function screenDefaults() {
 }
 function renderPicker() {
   const dev = state.device;
-  $('#exercise-picker').classList.toggle('hidden', dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp');
-  if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp') return;   // the box, the bands, the M-Band and the block have no screen
+  $('#exercise-picker').classList.toggle('hidden', dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp' || dev === 'gluco');
+  if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;   // the box, the bands, the M-Band and the block have no screen
   const list = CATALOG[dev], p = state.pick[dev];
   const before = p.key, m = normalizePick(list, p);
   if (dev === 'iphone' && p.key !== before) screenDefaults();
@@ -1532,7 +1582,7 @@ async function exportImage() {
     const type = state.format === 'png' ? 'image/png' : 'image/jpeg';
     const blob = await new Promise((r) => out.toBlob(r, type, 0.95));
     const { az, el } = getCamAngles();
-    const subject = isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}` : isBloom() ? `sword-bloom-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-m-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `thrive-pad_${state.stand ? 'stand' : state.pose}`;
+    const subject = isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}` : isBloom() ? `sword-bloom-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-m-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `thrive-pad_${state.stand ? 'stand' : state.pose}`;
     const name = `${subject}_az${Math.round(az)}_el${Math.round(el)}_${W}x${H}.${state.format}`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -1549,7 +1599,7 @@ async function exportImage() {
   }
 }
 $('#download').addEventListener('click', exportImage);
-if (new URLSearchParams(location.search).has('debug')) window.__studio = { renderToCanvas, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
+if (new URLSearchParams(location.search).has('debug')) window.__studio = { renderToCanvas, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
 
 // ---------------------------------------------------------------- init
 if (IS_TOUCH) $('.hint').textContent = 'Drag to rotate · Pinch to zoom · Two-finger drag to pan';
@@ -1574,7 +1624,7 @@ stand = standMesh;
 model.add(stand);
 applyPose();
 updateLights();
-if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else if (isBloom()) frameBloom(); else if (isScale()) frameScale(); else if (isBP()) frameBP(); else frame(32, 14);   // a device may have been picked while the studio loaded
+if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else if (isBloom()) frameBloom(); else if (isScale()) frameScale(); else if (isBP()) frameBP(); else if (isGluco()) frameGluco(); else frame(32, 14);   // a device may have been picked while the studio loaded
 $('#busy').classList.remove('show');
 $('#busy-text').textContent = 'Rendering…';
 // open on a device from a link, e.g. ?device=bands (the Figma "Sword 3D Studio" card links each device this way)

@@ -121,8 +121,8 @@ section h2 {
 
 /* device cards */
 /* six devices: two even rows of three (six in a row would be narrower than their icons) */
-/* nine devices: three rows of three */
-.devices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
+/* ten devices: two rows of five */
+.devices { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
 .devices button {
   display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 16px 2px 12px;
   border: 1.5px solid var(--grey-200); border-radius: var(--radius); background: var(--grey-50);
@@ -382,3 +382,15 @@ select {
 .bp-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--grey-600); }
 .bp-fields input { width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid var(--grey-300); border-radius: 8px; font: inherit; font-size: 14px; color: var(--grey-900, #111); text-align: center; font-variant-numeric: tabular-nums; background: #fff; }
 .bp-fields input:focus { outline: none; border-color: var(--grey-600); }
+
+/* the glucometer: white body, black LCD, a blue strip; its colours when picked */
+.devices .d-gl-body { fill: #fff; stroke: var(--grey-400); stroke-width: 1.4; }
+.devices .d-gl-lcd { fill: var(--grey-300); }
+.devices .d-gl-btn { fill: #fff; stroke: var(--grey-400); stroke-width: 1; }
+.devices .d-gl-strip { fill: var(--grey-300); }
+.devices button.on .d-gl-body { fill: #fff; stroke: #9a9ca1; }
+.devices button.on .d-gl-lcd { fill: #111; }
+.devices button.on .d-gl-btn { fill: #fff; stroke: #b7b9be; }
+.devices button.on .d-gl-strip { fill: #1f62d6; }
+/* its custom reading: three fields */
+.gl-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
