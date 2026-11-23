@@ -41,6 +41,8 @@
   <link rel="modulepreload" href="mband-weave.js" />
   <link rel="modulepreload" href="yogablock.js" />
   <link rel="modulepreload" href="bloompod.js" />
+  <link rel="modulepreload" href="scale.js" />
+  <link rel="modulepreload" href="bpmonitor.js" />
   <link rel="modulepreload" href="screens.js" />
   <link rel="modulepreload" href="scorebar.js" />
   <link rel="modulepreload" href="phoneui.js" />
@@ -97,6 +99,14 @@
           <button data-value="bloom" role="radio">
             <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M5 22.5C11 21 16 13 25 9.5S41 6 41.5 13.5 37 26.5 33.5 26.5" class="d-bp-tail" /><ellipse cx="24" cy="26.5" rx="10" ry="5.2" class="d-bp-pod" /><circle cx="5.6" cy="22.3" r="1.6" class="d-bp-end" /></svg>
             <span>Bloom pod</span>
+          </button>
+          <button data-value="scale" role="radio">
+            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="9" y="3" width="30" height="30" rx="4" class="d-sc-glass" /><rect x="18.5" y="6.5" width="11" height="4" rx="1" class="d-sc-display" /><ellipse cx="15" cy="13" rx="2.6" ry="3.4" class="d-sc-pad" /><ellipse cx="33" cy="13" rx="2.6" ry="3.4" class="d-sc-pad" /><ellipse cx="15" cy="25" rx="2.6" ry="3.4" class="d-sc-pad" /><ellipse cx="33" cy="25" rx="2.6" ry="3.4" class="d-sc-pad" /></svg>
+            <span>Scale</span>
+          </button>
+          <button data-value="bp" role="radio">
+            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="14" y="2" width="20" height="32" rx="6" class="d-bp-body" /><rect x="16.5" y="4.5" width="15" height="19" rx="3" class="d-bp-face" /><rect x="19" y="8.5" width="10" height="12" rx="1" class="d-bp-lcd" /><rect x="20.5" y="26.5" width="7" height="5" rx="1.5" class="d-bp-btn" /></svg>
+            <span>BP monitor</span>
           </button>
         </div>
         <div id="bands-rows" class="hidden">
@@ -177,6 +187,40 @@
             <button data-value="flat" title="Lying flat, the pod under the strap">Lying flat</button>
             <button data-value="sensor" title="Turned over: the pod on top, its sensors up">Sensors up</button>
           </div>
+        </div>
+        <div class="row hidden" id="bp-pose-row">
+          <label>Pose</label>
+          <div class="seg" data-seg="bppose">
+            <button data-value="standing" class="on" title="Standing, leaning back a little">Standing</button>
+            <button data-value="lying" title="Lying on its back, face up">Lying flat</button>
+          </div>
+        </div>
+        <div class="row hidden" id="bp-cuff-row">
+          <label>Cuff</label>
+          <div class="seg" data-seg="bpcuff">
+            <button data-value="with" class="on" title="With its cuff and tube, as in the images">With</button>
+            <button data-value="without" title="The monitor alone">Without</button>
+          </div>
+        </div>
+        <div class="row hidden" id="bp-reading-row">
+          <label>Reading</label>
+          <div class="seg" data-seg="bpreading">
+            <button data-value="high" class="on" title="High blood pressure: 138/88, pulse 78">High</button>
+            <button data-value="low" title="Low blood pressure: 105/68, pulse 78">Low</button>
+            <button data-value="custom" title="Your own numbers">Custom</button>
+          </div>
+        </div>
+        <div class="row hidden" id="bp-custom-row">
+          <div class="bp-fields">
+            <label>SYS<input id="bp-sys" type="text" inputmode="numeric" maxlength="3" value="138" /></label>
+            <label>DIA<input id="bp-dia" type="text" inputmode="numeric" maxlength="3" value="88" /></label>
+            <label>Pulse<input id="bp-pulse" type="text" inputmode="numeric" maxlength="3" value="78" /></label>
+            <label>Time<input id="bp-time" type="text" inputmode="numeric" maxlength="5" value="10:00" /></label>
+          </div>
+        </div>
+        <div class="row hidden" id="scale-reading-row">
+          <label for="scale-reading">Reading</label>
+          <input id="scale-reading" class="text-input" type="text" inputmode="decimal" value="185.0" maxlength="7" aria-label="The number on the scale's display" />
         </div>
         <div class="row hidden" id="bloom-light-row">
           <label>Light</label>

@@ -121,8 +121,8 @@ section h2 {
 
 /* device cards */
 /* six devices: two even rows of three (six in a row would be narrower than their icons) */
-/* seven devices: a row of four over a row of three */
-.devices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
+/* nine devices: three rows of three */
+.devices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
 .devices button {
   display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 16px 2px 12px;
   border: 1.5px solid var(--grey-200); border-radius: var(--radius); background: var(--grey-50);
@@ -356,3 +356,29 @@ select {
 .devices button.on .d-bp-tail { stroke: #c4aed3; }
 .devices button.on .d-bp-pod { fill: #ddcce8; stroke: #9a80ad; }
 .devices button.on .d-bp-end { fill: #c4aed3; }
+
+/* the scale: its glass, display and four electrodes; slate when picked */
+.devices .d-sc-glass { fill: #fff; stroke: var(--grey-400); stroke-width: 1.4; }
+.devices .d-sc-display { fill: var(--grey-300); }
+.devices .d-sc-pad { fill: var(--grey-200); stroke: var(--grey-400); stroke-width: 1; }
+.devices button.on .d-sc-glass { fill: #3c3f45; stroke: #22252a; }
+.devices button.on .d-sc-display { fill: #f4f4f4; }
+.devices button.on .d-sc-pad { fill: #c9c8c4; stroke: #8b8a86; }
+/* the scale's reading field */
+#scale-reading { width: 96px; padding: 7px 10px; border: 1px solid var(--grey-300); border-radius: 8px; font: inherit; text-align: right; font-variant-numeric: tabular-nums; background: #fff; }
+#scale-reading:focus { outline: none; border-color: var(--grey-600); }
+
+/* the blood pressure monitor: white body, black face, grey LCD; its colours when picked */
+.devices .d-bp-body { fill: #fff; stroke: var(--grey-400); stroke-width: 1.4; }
+.devices .d-bp-face { fill: var(--grey-300); }
+.devices .d-bp-lcd { fill: var(--grey-200); }
+.devices .d-bp-btn { fill: #fff; stroke: var(--grey-400); stroke-width: 1; }
+.devices button.on .d-bp-body { fill: #fff; stroke: #9a9ca1; }
+.devices button.on .d-bp-face { fill: #111; }
+.devices button.on .d-bp-lcd { fill: #4a4a50; }
+.devices button.on .d-bp-btn { fill: #fff; stroke: #b7b9be; }
+/* its custom reading: four small fields in a row */
+.bp-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.bp-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--grey-600); }
+.bp-fields input { width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid var(--grey-300); border-radius: 8px; font: inherit; font-size: 14px; color: var(--grey-900, #111); text-align: center; font-variant-numeric: tabular-nums; background: #fff; }
+.bp-fields input:focus { outline: none; border-color: var(--grey-600); }

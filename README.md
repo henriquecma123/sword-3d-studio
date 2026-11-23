@@ -1,6 +1,6 @@
 # Sword 3D Studio
 
-Product shots of Sword devices from any angle, in the browser: Thrive Pad, Vision AI phone, box, resistance bands, M-Band, yoga block and Bloom pod. Set the camera, light and floor, then export PNGs.
+Product shots of Sword devices from any angle, in the browser: Thrive Pad, Vision AI phone, box, resistance bands, M-Band, yoga block, Bloom pod, smart scale and blood pressure monitor. Set the camera, light and floor, then export PNGs.
 
 Live: https://sword.3d-studio.workers.dev/
 
