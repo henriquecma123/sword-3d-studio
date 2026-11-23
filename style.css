@@ -121,7 +121,8 @@ section h2 {
 
 /* device cards */
 /* six devices: two even rows of three (six in a row would be narrower than their icons) */
-.devices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
+/* seven devices: a row of four over a row of three */
+.devices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
 .devices button {
   display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 16px 2px 12px;
   border: 1.5px solid var(--grey-200); border-radius: var(--radius); background: var(--grey-50);
@@ -347,3 +348,11 @@ select {
 .band-picks button.on { border-color: var(--grey-700); color: var(--grey-900); font-weight: 600; }
 .band-picks button.on::before { opacity: 1; }
 #bands-rows .ghost { margin-top: 12px; }
+
+/* the Bloom pod: its egg-shaped pod and the tail looping over it; lilac when picked */
+.devices .d-bp-tail { fill: none; stroke: var(--grey-400); stroke-width: 2.8; stroke-linecap: round; }
+.devices .d-bp-pod { fill: #fff; stroke: var(--grey-400); stroke-width: 1.4; }
+.devices .d-bp-end { fill: var(--grey-400); }
+.devices button.on .d-bp-tail { stroke: #c4aed3; }
+.devices button.on .d-bp-pod { fill: #ddcce8; stroke: #9a80ad; }
+.devices button.on .d-bp-end { fill: #c4aed3; }

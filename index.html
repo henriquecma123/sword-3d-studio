@@ -35,15 +35,17 @@
   <link rel="modulepreload" href="iphone.js" />
   <link rel="modulepreload" href="box.js" />
   <link rel="modulepreload" href="bands.js" />
+  <link rel="modulepreload" href="pouch.js" />
   <link rel="modulepreload" href="bands-light.js" />
   <link rel="modulepreload" href="mband.js" />
   <link rel="modulepreload" href="mband-weave.js" />
   <link rel="modulepreload" href="yogablock.js" />
+  <link rel="modulepreload" href="bloompod.js" />
   <link rel="modulepreload" href="screens.js" />
   <link rel="modulepreload" href="scorebar.js" />
   <link rel="modulepreload" href="phoneui.js" />
   <link rel="modulepreload" href="phoenix.js" />
-  <link rel="preload" as="image" href="assets/screens/pad/13105-309.jpg" />
+  <link rel="preload" as="image" href="assets/screens/pad/13685-91228.jpg" />
   <link rel="preload" as="image" href="assets/logo.png" crossorigin="anonymous" />
   <link rel="preload" as="image" href="assets/sword-logo.png" />
 </head>
@@ -92,6 +94,10 @@
             <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M6 12 11 8H37L32 12Z" class="d-yb-top" /><path d="M4 14 9 10 11 8 6 12Z" class="d-yb-top" /><path d="M32 12 37 8 39 10 34 14Z" class="d-yb-bevel" /><path d="M34 14 39 10V27L34 31Z" class="d-yb-side" /><path d="M34 31 39 27 37 29 32 33Z" class="d-yb-under" /><path d="M6 12H32L34 14V31L32 33H6L4 31V14Z" class="d-yb-front" /><circle cx="12.4" cy="21.4" r="1.35" class="d-yb-ring" /><circle cx="12.4" cy="24.6" r="1.2" class="d-yb-ink" /><rect x="15.2" y="22.15" width="11.4" height="2.4" rx="1.2" class="d-yb-ink" /></svg>
             <span>Yoga block</span>
           </button>
+          <button data-value="bloom" role="radio">
+            <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M5 22.5C11 21 16 13 25 9.5S41 6 41.5 13.5 37 26.5 33.5 26.5" class="d-bp-tail" /><ellipse cx="24" cy="26.5" rx="10" ry="5.2" class="d-bp-pod" /><circle cx="5.6" cy="22.3" r="1.6" class="d-bp-end" /></svg>
+            <span>Bloom pod</span>
+          </button>
         </div>
         <div id="bands-rows" class="hidden">
           <div class="row">
@@ -103,6 +109,14 @@
             </div>
           </div>
           <div class="row">
+            <label>Pouch</label>
+            <div class="seg" data-seg="bandpouch">
+              <button data-value="without" class="on">Without</button>
+              <button data-value="with" title="The bands in their drawstring pouch, as in the product photo">With pouch</button>
+            </div>
+          </div>
+          <div class="slider hidden" id="band-out-row"><label for="band-out" title="How far the bands stand out of the pouch: push them in or pull them out">Out of the pouch <span id="band-out-v"></span></label><input id="band-out" type="range" min="-4" max="14" step="0.5" value="5.5" /></div>
+          <div class="row" id="band-pos-row">
             <label>Position</label>
             <div class="seg" data-seg="bandpos">
               <button data-value="floating">Floating</button>
@@ -162,6 +176,13 @@
             <button data-value="worn" class="on" title="Closed, as if worn">Worn</button>
             <button data-value="flat" title="Lying flat, the pod under the strap">Lying flat</button>
             <button data-value="sensor" title="Turned over: the pod on top, its sensors up">Sensors up</button>
+          </div>
+        </div>
+        <div class="row hidden" id="bloom-light-row">
+          <label>Light</label>
+          <div class="seg" data-seg="bloomlight">
+            <button data-value="off" class="on" title="The light off, as in most of its renders">Off</button>
+            <button data-value="on" title="The light above the power button on">On</button>
           </div>
         </div>
         <div class="row hidden" id="block-pose-row">

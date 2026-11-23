@@ -7,6 +7,7 @@ import { BOX, BOX_SCENE, createBoxMaterials, buildBox } from './box.js';
 import { BandsRig } from './bands.js';
 import { createMBandMaterials, buildMBand, poseMBand } from './mband.js';
 import { BLOCK, createBlockMaterials, buildBlock, poseBlock, setBlockFloor } from './yogablock.js';
+import { createBloomMaterials, buildBloom, setBloomFloor, setBloomLight } from './bloompod.js';
 import { studioLight, installCameraCurve } from './bands-light.js';
 import { PAD_SCREENS, PHONE_SCREENS, EXERCISES, VERSION } from './screens.js';
 import { drawScoreBar, drawPill, PILL_MAX, scoreBarFonts } from './scorebar.js';
@@ -24,9 +25,10 @@ const MAX_CANVAS_AREA = IS_IOS ? 16777216 : 268435456; // iOS Safari caps canvas
 
 // ---------------------------------------------------------------- state
 const state = {
-  device: 'pad',              // pad | iphone | box | bands | mband | block (the yoga block)
+  device: 'pad',              // pad | iphone | box | bands | mband | block (the yoga block) | bloom (the Bloom pod)
   boxPose: 'floating',        // box: floating (as in the mockup) | resting (lid up on the floor)
   mbandPose: 'worn',          // M-Band: worn (closed in a loop) | flat (lying flat) | sensor (turned over, sensors up)
+  bloomLight: false,          // Bloom pod: its light on or off (the renders show both)
   blockPose: 'standing',      // yoga block: standing (on its long side, as in its renders) | flat (logo up) | end (on its end)
   finish: 'white',            // iPhone finish
   stand: true,
@@ -42,8 +44,8 @@ const state = {
   floorGap: 0,               // cm from the device's lowest point down to the floor (each pose keeps its own)
   screenBrightness: 1.0,
   pick: {                     // chosen Figma exercise screen per device
-    pad: { g: 'f', ex: 'lunge', age: 'any', eth: 'any', key: '13105-309' },
-    iphone: { g: 'm', ex: 'lunge', age: 'any', eth: 'any', key: '13133-663' },
+    pad: { g: 'f', ex: 'lunge', age: 'any', eth: 'any', key: '13685-91228' },        // Thrive Pad / Lunge (Figma, 2026-11-20)
+    iphone: { g: 'f', ex: 'hip-abduction', age: 'any', eth: 'any', key: '13895-57715' },  // Vision AI / Hip abduction (user, 2026-11-22)
   },
   progress: 80,               // pad score bar fill, 0–100 (+5 reward at 100)
   msg: null,                  // pad Phoenix message; null = the screen's own
@@ -102,18 +104,21 @@ const MBM = createMBandMaterials(maxAniso);   // the M-Band: built in code, its 
 const mband = buildMBand(MBM);
 const BKM = createBlockMaterials(maxAniso);   // the yoga block: built in code, its foam procedural (yogablock.js)
 const block = buildBlock(BKM);
+const BLM = createBloomMaterials();   // the Bloom pod: built in code from its side render, its silicone procedural (bloompod.js)
+const bloom = buildBloom(BLM);
 const model = new THREE.Group();
 // the resistance bands: simulated (bands.js); their pin handles show on screen only
 const bandsRig = new BandsRig(maxAniso);
 await bandsRig.init();
 bandsRig.camera = camera;   // prints are turned to the camera once a preset settles
-model.add(tablet, stand, phone, box, mband, block, bandsRig.group);
+model.add(tablet, stand, phone, box, mband, block, bloom, bandsRig.group);
 scene.add(model, bandsRig.helpers);
 const isPhone = () => state.device === 'iphone';
 const isPad = () => state.device === 'pad';
 const isBox = () => state.device === 'box';
 const isMBand = () => state.device === 'mband';
 const isBlock = () => state.device === 'block';
+const isBloom = () => state.device === 'bloom';
 const isBands = () => state.device === 'bands';
 // the hooks can be shown in the image only for the shapes that hang on them (Hanging, Stretched); the tick is kept
 // for when one is picked again
@@ -188,6 +193,14 @@ function poseMBandStudio() {
   mband.position.set(-c.x, -b.min.y + 0.001, -c.z);
 }
 
+// the Bloom pod: lying on the floor as in its renders, the tail looping up over the pod
+function poseBloomStudio() {
+  bloom.position.set(0, 0, 0);
+  bloom.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(bloom, true), c = b.getCenter(new THREE.Vector3());
+  bloom.position.set(-c.x, -b.min.y + 0.001, -c.z);
+}
+
 // the yoga block: standing on its long side (as in its renders), lying flat or on its end, on the floor
 function poseBlockStudio() {
   poseBlock(block, state.blockPose);
@@ -212,17 +225,20 @@ function applyPose() {
   box.visible = isBox();
   mband.visible = isMBand();
   block.visible = isBlock();
+  bloom.visible = isBloom();
   bandsRig.group.visible = isBands(); applyBandAids();
   stand.visible = isPad() && state.stand;
   tablet.rotation.set(0, 0, 0);
   const mbFlat = isMBand() && state.mbandPose !== 'worn';
-  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : 140);
+  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : 140);
   if (isBands()) {
     // the bands pose themselves (the simulation); a new preset is built by setupBands()
   } else if (isMBand()) {
     poseMBandStudio();
   } else if (isBlock()) {
     poseBlockStudio();
+  } else if (isBloom()) {
+    poseBloomStudio();
   } else if (isBox()) {
     poseBox();
   } else if (isPhone()) {
@@ -248,7 +264,7 @@ function applyPose() {
 // distance, starting where the pose puts it: on the floor, or the box floating at its mockup's height
 const floorGaps = {};
 let floorRange = null;   // its slider (bound with the other shadow controls)
-const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
+const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
 function setFloor(fromPose) {
   if (isBands()) {
     // the bands' floor is their simulation's: fixed at y = 0. The slider sets how high the floating presets hang
@@ -266,7 +282,7 @@ function setFloor(fromPose) {
   }
   const y = low - state.floorGap - 0.001;
   ground.position.y = accPlane.position.y = y;
-  setBlockFloor(BKM, y);   // the block's foam darkens close to the floor
+  setBlockFloor(BKM, y); setBloomFloor(BLM, y);   // the block's foam darkens close to the floor
   topCam.position.set(0, y + 200, 0); topCam.lookAt(0, y, 0);
 }
 
@@ -275,6 +291,7 @@ function modelBounds() {
   if (isBox()) return new THREE.Box3().setFromObject(box);
   if (isMBand()) return new THREE.Box3().setFromObject(mband);
   if (isBlock()) return new THREE.Box3().setFromObject(block);
+  if (isBloom()) return new THREE.Box3().setFromObject(bloom);
   if (isBands()) { const b = bandsRig.bounds(); return b.isEmpty() ? new THREE.Box3(new THREE.Vector3(-10, 0, -10), new THREE.Vector3(10, 20, 10)) : b; }
   const bb = new THREE.Box3().setFromObject(tablet);
   if (state.stand) bb.expandByObject(stand);
@@ -354,7 +371,9 @@ const LIGHTING = { default: { room: [0.16, 0.30, 0.62], key: 1 },
   mband: { room: [0.18, 0.42, 0.55], key: 0.75, fill: 1.25, scrim: 0.28 },
   // the yoga block, as in its renders: a soft key from the front left, the fill from the front left too (the faces
   // turned from the key stay a clear, deep blue), a low scrim, and no strip on the far side of the key
-  block: { room: [0.42, 0.55, 0.7], key: 0.85, fill: 1.3, fillAz: 45, scrim: 0.55, strips: [0, 1] } };
+  block: { room: [0.42, 0.55, 0.7], key: 0.85, fill: 1.3, fillAz: 45, scrim: 0.55, strips: [0, 1] },
+  // the Bloom pod, as in its renders: a bright, soft, near-white studio, the key from above, a soft fill
+  bloom: { room: [0.5, 0.46, 0.2], key: 1.0, fill: 0.9, scrim: 0.7 } };
 const lighting = () => LIGHTING[state.device in LIGHTING ? state.device : 'default'];
 
 function buildEnvironment() {
@@ -747,6 +766,13 @@ function frame(az, el) {
 // the strap); lying flat: from the front, higher
 function frameMBand() { if (state.mbandPose === 'worn') frame(-42, 14); else frame(8, 34); }
 // the yoga block standing: from the front right and a little above, as in its render (its right side just showing)
+// the Bloom pod: its hero render's camera (a 55 mm lens from the front left, just above the floor: fitted to the
+// render's silhouette, Bloom pod/fit/camfit.py)
+function frameBloom() {
+  camera.setFocalLength(55); camera.updateProjectionMatrix();
+  state.focal = 55; $('#focal').value = state.focal; $('#focal-v').textContent = `${state.focal} mm`; paintRange($('#focal'));
+  frame(-36, 5);
+}
 function frameBlock() { if (state.blockPose === 'flat') frame(20, 38); else if (state.blockPose === 'end') frame(24, 10); else frame(16, 8); }
 // centred on the box; resting starts from the usual three-quarter view
 function frameBox() {
@@ -835,16 +861,21 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
     state.device = v;
     // the M-Band's renders are lit from the upper left, the light catching the tops of the yarn and the pod's edges
     if (v === 'mband' && !mbandLit) { mbandLit = true; state.lightAz = -35; state.lightEl = 38; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
+    // the Bloom pod's renders are lit from above and the front left: the tops of the pod and the tail bright, their
+    // undersides a deeper lilac
+    if (v === 'bloom' && !bloomLit) { bloomLit = true; state.lightAz = -50; state.lightEl = 62; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'bands' && !bandsRig.meshes.length) setupBands(false);
     syncSetupUI(); applyPose(); updateLights(); drawLightPad();
-    if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else frame(32, 14);
+    if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else frame(32, 14);
     renderPicker();
     if (screenPreset === 'exercise') setScreenPreset('exercise'); else updateScreen();
   }
   if (name === 'boxpose') { state.boxPose = v; applyPose(); updateLights(); frameBox(); }
   if (name === 'mbandpose') { state.mbandPose = v; applyPose(); updateLights(); frameMBand(); }
+  if (name === 'bloomlight') { state.bloomLight = v === 'on'; setBloomLight(BLM, state.bloomLight); markShadowDirty(); requestRender(); }
   if (name === 'blockpose') { state.blockPose = v; applyPose(); updateLights(); frameBlock(); }
   if (name === 'bandpos') { bandsRig.opts.pos = v; setupBands(true); }
+  if (name === 'bandpouch') { bandsRig.opts.pouch = v === 'with'; if (bandsRig.opts.pouch) bandsRig.opts.pos = 'surface'; setupBands(true); }
   if (name === 'bandshape') {
     // each shape has the gravity it needs: hung and stretched bands hang; the loops float, as in the brand's render
     bandsRig.opts.shape = v; bandsRig.opts.gravity = v === 'hang' || v === 'stretch';
@@ -864,19 +895,22 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
 function syncSetupUI() {
   const ph = isPhone();
   $('#stand-row').classList.toggle('hidden', !isPad());
-  $('#pose-row').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock() || (isPad() && state.stand));
+  $('#pose-row').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock() || isBloom() || (isPad() && state.stand));
   $('#mband-pose-row').classList.toggle('hidden', !isMBand());
   $('#block-pose-row').classList.toggle('hidden', !isBlock());
+  $('#bloom-light-row').classList.toggle('hidden', !isBloom());
   $('#box-pose-row').classList.toggle('hidden', !isBox());
   $('#bands-rows').classList.toggle('hidden', !isBands());
-  const floatingBands = bandsRig.opts.pos === 'floating';
-  $('#band-shape-row').classList.toggle('hidden', !floatingBands);
-  $('#band-lay-row').classList.toggle('hidden', floatingBands);
+  const floatingBands = bandsRig.opts.pos === 'floating', inPouch = bandsRig.opts.pouch;
+  $('#band-pos-row').classList.toggle('hidden', inPouch);
+  $('#band-out-row').classList.toggle('hidden', !inPouch);
+  $('#band-shape-row').classList.toggle('hidden', !floatingBands || inPouch);
+  $('#band-lay-row').classList.toggle('hidden', floatingBands || inPouch);
   $('#floor-gap').closest('.slider').classList.toggle('hidden', isBands() && !floatingBands);
   document.querySelectorAll('[data-band]').forEach((b) => b.classList.toggle('on', bandsRig.opts.on[b.dataset.band]));
-  { const o = bandsRig.opts; setSeg('bandpos', o.pos); setSeg('bandshape', o.shape); setSeg('bandlay', o.lay); setSeg('bandprint', o.print); $('#band-hooks').checked = bandHooksWanted; }
+  { const o = bandsRig.opts; setSeg('bandpos', o.pos); setSeg('bandshape', o.shape); setSeg('bandlay', o.lay); setSeg('bandprint', o.print); setSeg('bandpouch', o.pouch ? 'with' : 'without'); $('#band-hooks').checked = bandHooksWanted; }
   $('#band-hooks-row').classList.toggle('hidden', !bandHooksAllowed());   // only hung and stretched bands have hooks to show
-  $('#screen-section').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock());   // the box, the bands, the M-Band and the block have no screen
+  $('#screen-section').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock() || isBloom());   // the box, the bands, the M-Band and the block have no screen
   $('#finish-row').classList.toggle('hidden', !ph);
   $('#phoenix-section').classList.toggle('hidden', !ph);
   phx.group.visible = ph && state.phoenix.on;
@@ -891,7 +925,7 @@ document.querySelectorAll('[data-finish]').forEach((b) => b.addEventListener('cl
 }));
 
 // lighting
-let envTimer = 0, mbandLit = false;
+let envTimer = 0, mbandLit = false, bloomLit = false;
 // the box's mockup is lit by a key high on the front right (the direction of its floor shadow); its floor shadow is
 // darker and a little crisper than the studio's default; its lens is set by its framing
 let boxLook = { az: BOX_SCENE.key[0], el: BOX_SCENE.key[1], strength: 0.92, soft: 0.35 }, otherLook = null;
@@ -1081,7 +1115,7 @@ async function setScreenPreset(name) {
   if (name === 'off') screenSource = null;
   else if (name === 'exercise') {
     const dev = state.device;
-    if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block') return;
+    if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom') return;
     const src = dev === 'pad' ? await padExerciseSource() : await phoneExerciseSource();
     if (!src || screenPreset !== 'exercise' || state.device !== dev) return; // changed while loading
     screenSource = src;
@@ -1116,8 +1150,8 @@ function screenDefaults() {
 }
 function renderPicker() {
   const dev = state.device;
-  $('#exercise-picker').classList.toggle('hidden', dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block');
-  if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block') return;   // the box, the bands, the M-Band and the block have no screen
+  $('#exercise-picker').classList.toggle('hidden', dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom');
+  if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom') return;   // the box, the bands, the M-Band and the block have no screen
   const list = CATALOG[dev], p = state.pick[dev];
   const before = p.key, m = normalizePick(list, p);
   if (dev === 'iphone' && p.key !== before) screenDefaults();
@@ -1252,7 +1286,7 @@ function setupBands(reframe) {
 }
 // each preset's view: standing, from the front right and a little above, so each band behind shows past the one in
 // front (and its print)
-const bandsView = () => { const o = bandsRig.opts; return o.pos === 'surface' ? (o.lay === 'standing' ? [30, 22] : [18, 28]) : [0, 6]; };
+const bandsView = () => { const o = bandsRig.opts; return o.pouch ? [10, 8] : o.pos === 'surface' ? (o.lay === 'standing' ? [30, 22] : [18, 28]) : [0, 6]; };
 function frameBands() { const [az, el] = bandsView(); frame(az, el); }
 // the camera a preset will be framed with (as frameBands would, round the bands as they start): their prints are
 // aimed at it as the preset is built, so they never turn or jump once it shows
@@ -1270,6 +1304,9 @@ document.querySelectorAll('[data-band]').forEach((b) => b.addEventListener('clic
 }));
 $('#band-hooks').addEventListener('change', (e) => { bandHooksWanted = e.target.checked; bandsRig.setShowHooks(bandHooksWanted && bandHooksAllowed()); applyBandAids(); rebuildShadowProxy(); markShadowDirty(); resetShadow(); });
 $('#band-reset').addEventListener('click', () => setupBands(true));
+// in the pouch: how far the bands stand out of it (they fold in at the foot, or ride up the neck)
+let bandOutRaf = 0;   // one rebuild per frame however fast the slider moves
+bindRange('band-out', null, (v) => `${v.toFixed(1)} cm`, (v) => { bandsRig.opts.pouchOut = v; if (!bandOutRaf) bandOutRaf = requestAnimationFrame(() => { bandOutRaf = 0; setupBands(false); }); });
 
 // pointer: drag a band to pull it (⇧ as you let go pins it there), ⌥-drag moves a whole band, drag a pin to move
 // it; scroll over a pin (or while holding a band) turns it, ⇧-scroll twists it; double-click a pin to remove it
@@ -1407,7 +1444,7 @@ async function exportImage() {
     const type = state.format === 'png' ? 'image/png' : 'image/jpeg';
     const blob = await new Promise((r) => out.toBlob(r, type, 0.95));
     const { az, el } = getCamAngles();
-    const subject = isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-m-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `thrive-pad_${state.stand ? 'stand' : state.pose}`;
+    const subject = isBloom() ? `sword-bloom-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-m-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `thrive-pad_${state.stand ? 'stand' : state.pose}`;
     const name = `${subject}_az${Math.round(az)}_el${Math.round(el)}_${W}x${H}.${state.format}`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -1424,7 +1461,7 @@ async function exportImage() {
   }
 }
 $('#download').addEventListener('click', exportImage);
-if (new URLSearchParams(location.search).has('debug')) window.__studio = { renderToCanvas, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
+if (new URLSearchParams(location.search).has('debug')) window.__studio = { renderToCanvas, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
 
 // ---------------------------------------------------------------- init
 if (IS_TOUCH) $('.hint').textContent = 'Drag to rotate · Pinch to zoom · Two-finger drag to pan';
@@ -1449,7 +1486,11 @@ stand = standMesh;
 model.add(stand);
 applyPose();
 updateLights();
-if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else frame(32, 14);   // a device may have been picked while the studio loaded
+if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else if (isBloom()) frameBloom(); else frame(32, 14);   // a device may have been picked while the studio loaded
 $('#busy').classList.remove('show');
 $('#busy-text').textContent = 'Rendering…';
+// open on a device from a link, e.g. ?device=bands (the Figma "Sword 3D Studio" card links each device this way)
+{ const want = new URLSearchParams(location.search).get('device');
+  const btn = want && document.querySelector(`[data-seg="device"] button[data-value="${CSS.escape(want)}"]`);
+  if (btn && want !== state.device) btn.click(); }
 loop();

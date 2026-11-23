@@ -10,6 +10,7 @@
 // - Prints: "Light ●○○", "Medium ●●○", "Heavy ●●●" and the Sword symbol, on opposite sides of each band (the
 //   one picked faces the camera).
 import * as THREE from 'three';
+import { POUCH, pouchHW, Pouch } from './pouch.js';   // offline: the pouch
 
 export const BAND = { C: 60, W: 5, N: 150 };          // circumference, width (cm), segments
 // color: the latex's own (diffuse) colour, measured on the product photo's lit faces and folds; through: the colour a
@@ -24,6 +25,7 @@ const E = 1.2e7, G_MOD = E / 3, RHO = 1.0, GRAV = 981, BEND_DAMP = 0.0015;  // d
 const REST_ASPECT = 0.3;                                 // the relaxed oval: short over long axis
 const HOOK_R = 0.9;                                      // hook radius, cm: a studio dowel (the band wraps it smoothly)
 const MU_FLOOR = 0.9, MU_HOOK = 0.6, MU_BAND = 0.5;      // latex grips
+const MU_CLOTH = 0.35;                                    // latex on polyester twill
 const SUB = 3;                                           // render stations per segment
 // the segments' turning inertia, x10: with their true (tiny) inertia the bending and shear constraints pump energy
 // into the rotations; heavier rotations are stable and change only how fast a twist swings, not the shapes
@@ -99,7 +101,8 @@ function stadiumLoop(n, C, re) {   // flattened: two straight layers 2 re apart 
 // node positions and segment frames of a planar loop (X, Y in its plane, Z across the band), placed by a matrix
 function placeLoop(pts2, mat) {
   const n = pts2.length, x = [], q = [];
-  let cx = 0, cy = 0; for (const p of pts2) { cx += p[0] / n; cy += p[1] / n; }
+  let area = 0; for (let i = 0; i < n; i++) { const a = pts2[i], b = pts2[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+  const orient = area > 0 ? 1 : -1;   // anticlockwise: outward is to the right of the way it runs
   const V = (a) => new THREE.Vector3(...a).applyMatrix4(mat);
   const R = new THREE.Matrix4().extractRotation(mat);
   const D = (a) => new THREE.Vector3(...a).applyMatrix4(R).normalize();
@@ -107,9 +110,9 @@ function placeLoop(pts2, mat) {
   for (let i = 0; i < n; i++) {
     const a = pts2[i], b = pts2[(i + 1) % n];
     let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.sqrt(tx * tx + ty * ty); tx /= tl; ty /= tl;
-    // outward normal in the plane: the side away from the loop's centre
-    let nx = ty, ny = -tx; const mx = (a[0] + b[0]) / 2 - cx, my = (a[1] + b[1]) / 2 - cy;
-    if (nx * mx + ny * my < 0) { nx = -nx; ny = -ny; }
+    // outward normal in the plane, from the way the loop runs (its signed area), the same all round: tested segment by
+    // segment against the centre, it flipped on long sloping stretches (the pouch's opened tops) into half-turn flaps
+    const nx = ty * orient, ny = -tx * orient;
     const d3 = D([tx, ty, 0]), d2 = D([nx, ny, 0]), d1 = new THREE.Vector3().crossVectors(d2, d3);
     q.push(quatFromFrame(d1.toArray(), d2.toArray(), d3.toArray()));
   }
@@ -196,6 +199,7 @@ class Band {
 export class BandWorld {
   constructor() {
     this.bands = []; this.hooks = []; this.clips = [];
+    this.pouch = null;   // offline: when set, the pouch's walls hold the bands (pouchContacts)
     this.gravity = 1; this.floorY = 0; this.substeps = 16; this.calm = 0; this.awake = true;
     this.damping = 2.2;   // per second: air and the latex's own losses (a hung band swings for a couple of seconds)
     this.pairs = []; this._f = new Float64Array(9); this._g = new Float64Array(9);
@@ -231,6 +235,7 @@ export class BandWorld {
     this.applyPins();
     this.broadphase();
     for (const b of this.bands) { (b._x0 ??= new Float64Array(b.x.length)).set(b.x); (b._q0 ??= new Float64Array(b.q.length)).set(b.q); }
+    if (this.pouch) this.pouchSides();
     const h = dt / this.substeps, S = this.substeps;
     // calming down: from 3 s after the last touch (wake: a drag, a turn, a preset) the air thickens a little, up to 12
     // more per second by 7 s, and at 9 s whatever still moves is put to rest. Real bands come to rest within seconds;
@@ -283,6 +288,12 @@ export class BandWorld {
   }
   applyPins() {   // the masses of clipped nodes and segments
     for (const b of this.bands) { b.iw.fill(1 / b.m); b.iwr.fill(12 / (ROT_INERTIA * b.m * b.W * b.W)); b.pin.fill(0); }
+    // (offline, the pouch) the nodes held in it, chosen once when the band is placed (a free end falling past the
+    // neck outside the pouch must not freeze in mid-air)
+    if (this.pinBelow != null) for (const b of this.bands) {
+      if (!b.hold) { b.hold = new Uint8Array(b.n); for (let i = 0; i < b.n; i++) b.hold[i] = b.x[3 * i + 1] < this.pinBelow ? 1 : 0; }
+      for (let i = 0; i < b.n; i++) if (b.hold[i]) { b.iw[i] = 0; if (b.hold[(i + 1) % b.n]) { b.iwr[i] = 0; b.pin[i] = 1; } }
+    }
     for (const c of this.clips) { const b = c.band, n = b.n; b.iw[c.seg] = 0; b.iw[(c.seg + 1) % n] = 0; b.iwr[c.seg] = 0; b.pin[c.seg] = 1; }
   }
   substep(h) {
@@ -525,7 +536,7 @@ export class BandWorld {
       // (without the twist's stiffening a band twisted by a turned hook crinkled, and one dropped coiled up like string)
       const tau = (2 * C[2]) / b.l0, kt = Math.min(60, 1 + b.KT * tau * tau);
       for (let k = 0; k < 3; k++) {
-        const at = (k === 2 ? aB[k] / kt : aB[k]) * ih2;
+        const at = (k === 2 ? aB[k] / kt : k === 0 && b.kB ? aB[k] / b.kB[i] : aB[k]) * ih2;
         dl[k] = -(C[k] + at * lamB[3 * i + k] + gam * dC[k]) / ((1 + gam) * W + at);
         lamB[3 * i + k] += dl[k];
       }
@@ -580,6 +591,7 @@ export class BandWorld {
       // six cost a third of the simulation's time
       const hooks = this.hooksNear(b);
       this.floorContacts(b);
+      if (this.pouch) this.pouchContacts(b);
       if (hooks.length) { this.hookContacts(b, hooks); this.hookChords(b, hooks); }
     }
   }
@@ -611,6 +623,56 @@ export class BandWorld {
       // how hard the floor pushed this substep, summed over every pass (its friction, floorGrip, is in proportion;
       // counting only the last pass, after the first had taken most of the weight, left bands in a pile sliding)
       if (floorPush > 0) { const c = (s + 1) % b.n; b.fc[s] += 0.5 * floorPush; b.fc[c] += 0.5 * floorPush; }
+    }
+  }
+  // ---- the pouch (offline). Each segment is inside or outside it at the frame's start (its middle within the walls,
+  // below the gathered top); inside, its five points across the band are kept within the walls (the sides firmly, the
+  // front and back as far as the cloth gives); outside, they are kept out of it. Over the top a band moves freely, so
+  // it can be lifted out (or dropped in)
+  pouchSides() {
+    for (const b of this.bands) {
+      const io = (b.pIn ??= new Int8Array(b.n));
+      for (let s = 0; s < b.n; s++) {
+        const a = 3 * s, c = 3 * ((s + 1) % b.n), x = 0.5 * (b.x[a] + b.x[c]), y = 0.5 * (b.x[a + 1] + b.x[c + 1]), z = 0.5 * (b.x[a + 2] + b.x[c + 2]);
+        // (the posed pouch: what is held stays in; what is free can only ever be over the neck or outside, never
+        // back in through the cloth, which it has no way to reach)
+        if (b.hold && !b.hold[s]) { io[s] = y > POUCH.H - 1.0 ? 0 : -1; continue; }
+        io[s] = y > POUCH.H ? 0 : Math.abs(x) < pouchHW(y) + 0.3 && Math.abs(z) < POUCH.hd + 0.6 ? 1 : -1;
+      }
+    }
+  }
+  pouchContacts(b) {
+    const r = this._pr ??= [0, 0, 0], n = this._pn ??= [0, 0, 0], f = this._f, io = b.pIn; if (!io) return;
+    const hw = b.W / 2 - b.t / 2, ht = b.t / 2;
+    for (let s = 0; s < b.n; s++) {
+      if (b.pin[s] || io[s] === 0) continue;
+      const s2 = (s + 1) % b.n;
+      if (Math.min(b.x[3 * s + 1], b.x[3 * s2 + 1]) - b.W / 2 > POUCH.H) continue;
+      for (let ui = -2; ui <= 2; ui++) {
+        frameOf(b.q, f, 4 * s);
+        const u = (ui / 2) * hw;
+        const px = 0.5 * (b.x[3 * s] + b.x[3 * s2]) + u * f[0], py = 0.5 * (b.x[3 * s + 1] + b.x[3 * s2 + 1]) + u * f[1], pz = 0.5 * (b.x[3 * s + 2] + b.x[3 * s2 + 2]) + u * f[2];
+        if (py > POUCH.H) continue;
+        const wx = pouchHW(py) - ht, wz = POUCH.hd - ht;
+        let C = 0;
+        const cw = POUCH.clothHW ? POUCH.clothHW(Math.min(py, POUCH.H), px) : wx + ht + 0.25;   // the cloth's own outline here
+        if (io[s] === 0 && b.hold && py < POUCH.H + 0.3 && Math.abs(px) < cw && Math.abs(pz) > 1.0 && Math.abs(pz) < POUCH.clothZ(POUCH.H)) {
+          // (the posed pouch) a free band bending over the neck rests on the gathered rim, not through it
+          C = py - (POUCH.H + 0.3); n[0] = 0; n[1] = 1; n[2] = 0;
+        } else if (io[s] > 0) {   // inside: within the walls
+          if (Math.abs(px) > wx) { C = wx - Math.abs(px); n[0] = -Math.sign(px); n[1] = 0; n[2] = 0; }
+          else if (Math.abs(pz) > wz) { C = wz - Math.abs(pz); n[0] = 0; n[1] = 0; n[2] = -Math.sign(pz); }
+        } else {           // outside: out of the pouch, by the nearer way
+          const cz = POUCH.clothSurf ? POUCH.clothSurf(px, py, pz) : POUCH.clothZ(py);   // (the cloth as it is, where it has been drawn)
+          const ox = Math.max(wx + 2 * ht + 0.25, cw + ht + 0.15) - Math.abs(px), oz = Math.max(cz, 0.3) + ht + 0.05 - Math.abs(pz);
+          if (ox > 0 && oz > 0) { if (ox < oz) { C = -ox; n[0] = Math.sign(px) || 1; n[1] = 0; n[2] = 0; } else { C = -oz; n[0] = 0; n[1] = 0; n[2] = Math.sign(pz) || 1; } }
+        }
+        if (C < 0) {
+          r[0] = u * f[0]; r[1] = u * f[1]; r[2] = u * f[2];
+          const W = this.pointWeight(b, s, r, n);
+          if (W > 0) { this.pushPoint(b, s, r, n, -C / W); this.friction(b, s, u, r, n, -C, MU_CLOTH, null); }
+        }
+      }
     }
   }
   hookContacts(b, hooks) {
@@ -803,6 +865,79 @@ export function restOval() { return ellipseLoop(BAND.N, BAND.C, REST_ASPECT); }
 // settle from there (starting tighter, the floor's friction held them too flat: low folds, unlike the photo's)
 export const foldRadius = (t) => 0.6 * Math.cbrt((E * t * t) / (12 * RHO * GRAV));
 export function flatLoop(t = 0.07) { return stadiumLoop(BAND.N, BAND.C, foldRadius(t)); }
+// offline, the pouch scene: a band as it sits in the pouch, out of it by `out` cm. Built round a centreline (the
+// "spine", in the band's plane: x up, y front-back) with the two strands either side of it and a round fold at each end.
+// - In the pouch it is folded flat (the strands 1 cm apart); once clear of the neck it springs open, the front strand
+//   bowing out more than the back, the open part drooping back a little, the top folding over in a round arch.
+// - Pushed further in than it is long, its foot bends over and runs along the pouch's floor (forwards or backwards,
+//   band by band); pulled further out, it rides up, its fold off the floor, held by the drawstring.
+// - Spaced evenly by arc length, 60 cm round. Returns the outline and the height of its lowest point.
+const PBL_CACHE = new Map();   // the shapes, by band and setting (the slider revisits the same ones)
+export function pouchBandLoop(i, out, H) {
+  const ck = `${i % 3}|${out.toFixed(2)}|${H}`; if (PBL_CACHE.has(ck)) return PBL_CACHE.get(ck);
+  const rb = 0.5, R = 1.3, ph = [0.4, 2.1, 4.0][i % 3], dir = [-1, 1, -1][i % 3];
+  const Of = [1.3, 0.95, 1.15][i % 3], Ob = [0.6, 0.62, 0.5][i % 3], droop = [0.35, 0.7, 0.3][i % 3];
+  const build = (V, F, base, A = 0) => {
+    // the spine: (foot along the floor, F cm) -> bend of radius R -> straight up V cm
+    const sp = [];
+    if (F > 0) {
+      for (let k = 0; k <= 30; k++) sp.push([rb, dir * (F + R) - dir * F * (k / 30)]);                          // the foot
+      for (let k = 1; k <= 30; k++) { const a = (k / 30) * Math.PI / 2; sp.push([rb + R - R * Math.cos(a), dir * R * (1 - Math.sin(a))]); }   // the bend
+    } else sp.push([rb, 0]);
+    const x0 = sp[sp.length - 1][0];
+    const wl = 4.5, x1 = H - base - 2.5;   // the waves: 6.5 cm long, only in the pouch (below its neck, by 2.5 cm)
+    for (let k = 1; k <= 200; k++) { const x = x0 + V * (k / 200), env = smooth01((x - x0) / 2) * smooth01((x1 - x) / 2.5);
+      sp.push([x, A * env * Math.sin((2 * Math.PI * (x - x0)) / wl + i * 1.3)]); }                          // up
+    // the strands: offset either side of the spine, opening once clear of the neck (its height in the pouch, below)
+    const neck = H - base, open = (x) => smooth01((x - neck - 0.5) / 4.0), lean = (x) => -droop * open(x) ** 2;
+    const fr = [], bk = [];
+    for (let k = 0; k < sp.length; k++) {
+      const p = sp[k], q = sp[Math.min(sp.length - 1, k + 1)], o = sp[Math.max(0, k - 1)];
+      let tx = q[0] - o[0], ty = q[1] - o[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      const nX = -ty, nY = tx;   // left of the way it runs: the front strand on the upright part, and continuous round the bend
+      const hf = rb + (Of - rb) * open(p[0]) + 0.04 * Math.sin(p[0] * 0.9 + ph) * (1 - open(p[0]));
+      const hb = rb + (Ob - rb) * open(p[0]) - 0.03 * Math.sin(p[0] * 1.3 + ph * 2) * (1 - open(p[0]));
+      const ln = lean(p[0]);
+      fr.push([p[0] + nX * hf, p[1] + nY * hf + ln]); bk.push([p[0] - nX * hb, p[1] - nY * hb + ln]);
+    }
+    const pts = [];
+    // the bottom fold: round, from the back strand to the front one, behind the spine's start
+    { const p = sp[0], q = sp[1]; let tx = q[0] - p[0], ty = q[1] - p[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      const a0 = bk[0], a1 = fr[0], cx = (a0[0] + a1[0]) / 2, cy = (a0[1] + a1[1]) / 2, ux = (a1[0] - a0[0]) / 2, uy = (a1[1] - a0[1]) / 2, r = Math.hypot(ux, uy);
+      for (let k = 0; k <= 24; k++) { const t = (k / 24) * Math.PI; pts.push([cx - ux * Math.cos(t) - tx * r * Math.sin(t), cy - uy * Math.cos(t) - ty * r * Math.sin(t)]); } }
+    for (let k = 1; k < fr.length; k++) pts.push(fr[k]);
+    // the top: a round arch over from the front strand to the back
+    { const f = fr[fr.length - 1], g = bk[bk.length - 1], cy = (f[1] + g[1]) / 2, ry = (f[1] - g[1]) / 2, rx = Math.abs(ry) * 0.92, xs = (f[0] + g[0]) / 2;
+      for (let k = 1; k < 40; k++) { const t = (k / 40) * Math.PI; pts.push([xs + rx * Math.sin(t), cy + ry * Math.cos(t)]); } }
+    for (let k = bk.length - 1; k > 0; k--) pts.push(bk[k]);
+    return pts;
+  };
+  const per = (pts) => { let L = 0; for (let k = 0; k < pts.length; k++) { const a = pts[k], c = pts[(k + 1) % pts.length]; L += Math.hypot(c[0] - a[0], c[1] - a[1]); } return L; };
+  const top = (pts) => Math.max(...pts.map((p) => p[0]));
+  const solveV = (F, base, A = 0) => { let lo = 4, hi = 34; for (let it = 0; it < 22; it++) { const m = (lo + hi) / 2; if (per(build(m, F, base, A)) > BAND.C) hi = m; else lo = m; } return (lo + hi) / 2; };
+  // standing on the floor, how far out is it? then fold a foot in, or lift it, to meet the asked `out`
+  const floor = 0.9;   // (on the pouch's rounded bottom, not down in its seam)
+  let F = 0, base = floor, V = solveV(0, floor), pts = build(V, 0, floor);
+  const natural = floor + top(pts) - H;
+  if (out < natural) {   // push in: the part in the pouch buckles in soft front-back waves (latex can't shorten)
+    let lo = 0, hi = 2.2;
+    for (let it = 0; it < 15; it++) { const m = (lo + hi) / 2; const v = solveV(0, floor, m), t = floor + top(build(v, 0, floor, m)) - H; if (t > out) lo = m; else hi = m; }
+    const A = (lo + hi) / 2; V = solveV(0, floor, A); pts = build(V, 0, floor, A);
+  } else if (out > natural) {   // pull out: the band rides up the neck
+    base = floor + (out - natural); V = solveV(0, base); pts = build(V, 0, base);
+  }
+  // evenly spaced
+  const n = BAND.N, cum = [0];
+  for (let k = 1; k <= pts.length; k++) { const a = pts[k - 1], c = pts[k % pts.length]; cum.push(cum[k - 1] + Math.hypot(c[0] - a[0], c[1] - a[1])); }
+  const res = []; let j = 0;
+  for (let k = 0; k < n; k++) {
+    const sv = (k / n) * cum[pts.length]; while (cum[j + 1] < sv) j++;
+    const a = pts[j], c = pts[(j + 1) % pts.length], f = (sv - cum[j]) / Math.max(1e-9, cum[j + 1] - cum[j]);
+    res.push([a[0] + (c[0] - a[0]) * f, a[1] + (c[1] - a[1]) * f]);
+  }
+  const R_ = { pts: res, base, foot: F }; PBL_CACHE.set(ck, R_); return R_;
+}
+export function packedLoop(re) { return stadiumLoop(BAND.N, BAND.C, re); }   // offline: folded tight, as packed in the pouch
 // floating, as in the brand's render: open loops, each a little irregular, as a soft latex loop sits when let go. A
 // rounded oval (a superellipse, p) with a waist, a bend (C) or an S along it, or one strand bowed in; one per band, so
 // they don't look alike. In the units of the half length; scaled to the band's 60 cm.
@@ -905,14 +1040,16 @@ export function bandMaterial(map, key) {
   // satin latex: a soft gloss, a faint rubbery sheen at grazing angles
   const m = new THREE.MeshPhysicalMaterial({ map, color: new THREE.Color(S.color), roughness: 0.42, metalness: 0, ior: 1.52,
     specularIntensity: 0.9, sheen: 0.14, sheenRoughness: 0.55, sheenColor: new THREE.Color(0xffffff) });
-  const through = new THREE.Color(S.through), trans = 0.5 - 2 * S.t;   // thinner bands let more through (0.34 Light .. 0.26 Heavy)
+  const through = new THREE.Color(S.through), trans = 0.5 - 2 * S.t;
+  m.userData.uEdgeGlow = { value: 0.42 };   // offline: lower in the pouch scene   // thinner bands let more through (0.34 Light .. 0.26 Heavy)
   // the mesh's 'ao' attribute: how much of the room each point sees (the inside of a loop sees the band itself);
   // 'aoBack': the same for the other face at that point, whose light comes through
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uThrough = { value: new THREE.Vector3(through.r, through.g, through.b).multiplyScalar(trans) };
+    sh.uniforms.uEdgeGlow = m.userData.uEdgeGlow;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float ao;\nattribute float aoBack;\nattribute float rough;\nattribute vec3 sp;\nvarying float vAO;\nvarying float vAOBack;\nvarying float vRough;\nvarying vec3 vSp;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvAO = ao; vAOBack = aoBack; vRough = rough; vSp = sp;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vAO;\nvarying float vAOBack;\nvarying float vRough;\nvarying vec3 vSp;\nuniform vec3 uThrough;\n' + LATEX_GLSL)
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vAO;\nvarying float vAOBack;\nvarying float vRough;\nvarying vec3 vSp;\nuniform vec3 uThrough;\nuniform float uEdgeGlow;\n' + LATEX_GLSL)
       // the gloss: the surface's own variation (vRough), a slower unevenness, and a touch more where the grain is too
       // fine to draw
       .replace('#include <roughnessmap_fragment>', `float lxPx = length( fwidth( vSp ) ) * 70.0;
@@ -951,7 +1088,7 @@ export function bandMaterial(map, key) {
 			// a cut edge (vSp.z past 13.5): light scattered along inside the latex comes out of it, so it shows lighter,
 			// as the band's thickness does in photos
 			float lxEdge = step( 13.5, vSp.z );
-			reflectedLight.indirectDiffuse += lxEdge * 0.42 * ( getIBLIrradiance( geometryNormal ) * 0.5 + getIBLIrradiance( vec3( 0.0, 1.0, 0.0 ) ) * 0.5 ) * RECIPROCAL_PI * alb;
+			reflectedLight.indirectDiffuse += lxEdge * uEdgeGlow * ( getIBLIrradiance( geometryNormal ) * 0.5 + getIBLIrradiance( vec3( 0.0, 1.0, 0.0 ) ) * 0.5 ) * RECIPROCAL_PI * alb;
 		#endif
 	}`);
   };
@@ -1180,6 +1317,8 @@ const SLOTS = {
   hang: [[{ x: 0, yaw: 50 }], [{ x: -7, yaw: -45 }, { x: 7, yaw: 45 }], [{ x: -13, yaw: -45 }, { x: 0, yaw: 50 }, { x: 13, yaw: 45 }]],
   flat: [[{ z: 0 }], [{ z: 3.4, x: -1 }, { z: -3.4, x: 1.5 }], [{ z: 6.6, x: -1.5 }, { z: 0.2, x: 1 }, { z: -6.4, x: 3 }]],
   // standing: each in its own outline (about 26 x 8-10 cm), clear of each other, one behind the other as in the product shot
+  // in the pouch: side by side, pink to the left, blue in the middle, yellow to the right (as in the product photo)
+  pouch: [[{ x: 0 }], [{ x: -2.55 }, { x: 2.55 }], [{ x: -5.08 }, { x: 0 }, { x: 5.08 }]],
   standing: [[{ x: 0, z: 0 }], [{ x: 3, z: -5.5 }, { x: -3, z: 5.5 }], [{ x: 5, z: -11, yaw: -6 }, { x: -3, z: 0, yaw: 3 }, { x: 4, z: 11, yaw: -4 }]],
 };
 
@@ -1190,7 +1329,8 @@ export class BandsRig {
     this.helpers = new THREE.Group(); this.helpers.name = 'band-pins'; // pin handles: on screen, never in the image
     this.showAids = true;
     this.maxAniso = maxAniso;
-    this.opts = { on: { heavy: true, light: true, medium: true }, pos: 'surface', shape: 'loops', lay: 'flat', gravity: false, print: 'label', showHooks: false, lift: 10 };
+    this.opts = { on: { heavy: true, light: true, medium: true }, pos: 'surface', shape: 'loops', lay: 'flat', gravity: false, print: 'label', showHooks: false, lift: 10, pouch: false, pouchOut: 5.5 };
+    this.pouch = null;   // offline: the drawstring pouch (pouch.js), built when first wanted
     this.meshes = []; this.tex = {}; this.mats = {}; this.drag = null; this.frame = 0; this.aoDirty = true;
     this.pinMat = new THREE.MeshBasicMaterial({ color: 0xff7e7e, depthTest: false, transparent: true, opacity: 0.95 });
     this.pinRing = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.95 });
@@ -1207,16 +1347,42 @@ export class BandsRig {
   // ------------------------------------------------ building a preset
   setup() {
     const W = this.world, o = this.opts;
-    W.clear(); W.gravity = o.pos === 'floating' && !o.gravity ? 0 : 1; W.floorY = 0;
+    // (the pouch: what the bands were a moment ago, so a change of the slider carries them on from there rather than
+    // starting them again: pulled out, a band rides up as it was, its free end swinging on, not thrown about anew)
+    const prev = o.pouch && this._pouchState && W.bands.length ? { out: this._pouchState, bands: new Map(W.bands.map((b) => [b.key, { x: b.x.slice(), q: b.q.slice(), hold: b.hold }])) } : null;
+    W.clear(); W.gravity = o.pos === 'floating' && !o.gravity && !o.pouch ? 0 : 1; W.floorY = 0;
+    if (o.pouch && !this.pouch) this.pouch = new Pouch();
+    if (o.pouch) { const out = o.pouchOut ?? 5.5; this.pouch.top = POUCH.H + out; this.pouch.close = 0.5 * smooth01((-0.5 - out) / 3.5); }   // drawn in a little as the bands go below the neck
+    if (this.pouch) { if (o.pouch) this.group.add(this.pouch.group); else this.group.remove(this.pouch.group); }
+    W.pouch = o.pouch ? POUCH : null;
+    if (this.pouch) { POUCH.clothHW = (y, x = 0) => this.pouch.outline(y, Math.sign(x)); POUCH.clothSurf = (x, y, z) => this.pouch.surfaceAt(x, y, z < 0 ? 1 : 0); }   // the bands outside keep clear of the cloth's real outline
     for (const M of this.meshes) this.group.remove(M.mesh);
     this.meshes = [];
-    const keys = this.keys(), kind = o.pos === 'surface' ? o.lay : o.shape;
+    const keys = this.keys(), kind = o.pouch ? 'pouch' : o.pos === 'surface' ? o.lay : o.shape;
     const slots = SLOTS[kind === 'stretch' ? 'hang' : kind][keys.length - 1];
     const pts = restOval(), a = Math.max(...pts.map((p) => p[0]));
     keys.forEach((key, i) => {
       const S = slots[i], t = BANDS[key].t, z = new THREE.Vector3(0, 0, 1);
       let b;
-      if (kind === 'flat') {
+      if (kind === 'pouch') {
+        // posed, not simulated (the user: "don't make the bands interactive in the pouch"): as in the product photo,
+        // each band folded flat, standing straight up side by side, touching, its rounded top an open loop 5.5 cm out
+        // of the neck, a slight turn each so the loops read open
+        const outI = (o.pouchOut ?? 5.5) + [0.3, 0.15, 0][i % 3], L = pouchBandLoop(i, outI, POUCH.H), shape = L.pts;
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), [-10, 3, 5][i % 3] * Math.PI / 180)
+          .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), [0.7, -0.3, -0.5][i % 3] * Math.PI / 180)).multiply(VERTICAL);   // (pivoting at the base: a degree moves the top 4 mm)
+        b = W.addBand(key, shapeAt(shape, q, [S.x || 0, L.base, [0.1, -0.05, 0.05][i % 3]]));
+        // the drawstring squeezes what is in the pouch together towards the top, as it draws the cloth in
+        if (this.pouch.close) for (let k = 0; k < b.n; k++) { const y = b.x[3 * k + 1]; b.x[3 * k] *= 1 - 0.55 * this.pouch.closeAt(y); }
+        // its rest shape is the flat loop it was packed as (latex keeps the shape it was stored in): the free part
+        // holds up as far as its stiffness carries its weight, then sags and folds over
+        b.setRest(packedLoop(0.5), false);
+        // where the drawstring holds it, a band is squeezed into a slight curl across its width, which stiffens it
+        // like a tape measure; the effect fades over a few centimetres above the neck (so a band just out of the pouch
+        // stands, one pulled far out bends over under its own weight)
+        b.kB = new Float64Array(b.n);
+        for (let k = 0; k < b.n; k++) { const y = 0.5 * (b.x[3 * k + 1] + b.x[3 * ((k + 1) % b.n) + 1]); b.kB[k] = 1 + 8 * Math.exp(-Math.max(0, y - (POUCH.H - 0.8)) / 4); }
+      } else if (kind === 'flat') {
         b = W.addBand(key, shapeAt(flatLoop(t), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (S.yaw || (i - 1) * 2.5) * Math.PI / 180), [S.x || 0, foldRadius(t) + t / 2 + 0.03 + i * 0.002, S.z || 0]));
       } else if (kind === 'standing') {
         // in its own organic outline, which it keeps (and springs back to when let go)
@@ -1250,10 +1416,41 @@ export class BandsRig {
     this.applyPrint();
     // the floating presets start with their lowest point at the chosen height over the floor (clear of it from the
     // first step), and keep it there while they form
-    if (o.pos === 'floating') { const low = Math.min(...W.bands.map((b) => b.minY())); if (Number.isFinite(low)) this.shift(0, o.lift - low, 0); }
-    this.settleHeight = o.pos === 'floating'; this.frame = 0;
+    if (o.pos === 'floating' && !o.pouch) { const low = Math.min(...W.bands.map((b) => b.minY())); if (Number.isFinite(low)) this.shift(0, o.lift - low, 0); }
+    this.settleHeight = o.pos === 'floating' && !o.pouch; this.frame = 0;
+    if (o.pouch) this.pouch.update(W);
     this.syncHooks(); this.updateMeshes(); this.aoDirty = true;
     W.wake();
+    for (const k of Object.keys(this.mats)) { const mt = this.mats[k]; mt.userData.uEdgeGlow.value = o.pouch ? 0.14 : 0.42; mt.roughness = o.pouch ? 0.58 : 0.42; mt.specularIntensity = o.pouch ? 0.6 : 0.9; mt.sheen = o.pouch ? 0.3 : 0.14; }
+    // barely out (2 cm or less) a band has nothing free to move: it is held whole; further out its free part is simulated
+    W.pinBelow = o.pouch ? ((o.pouchOut ?? 5.5) > 2 ? POUCH.H - 0.8 : 1e9) : null;
+    if (o.pouch && W.pinBelow < 1e8) {
+      const dOut = prev ? (o.pouchOut ?? 5.5) - prev.out : 0;
+      for (const b of W.bands) {
+        b.hold = new Uint8Array(b.n); for (let i = 0; i < b.n; i++) b.hold[i] = b.x[3 * i + 1] < W.pinBelow ? 1 : 0;   // (from the pose: chosen once)
+        const P = prev && prev.bands.get(b.key);
+        if (!P || !P.hold || P.x.length !== b.x.length || Math.abs(dOut) > 4) continue;
+        // its free part: where it was, lifted (or lowered) by the change; the rest as packed
+        // (pushed in, it stays where it was: the part going in drags it after it, over the rim, as the band slides)
+// (pushed in, the pull spreads along it from where it goes in: near there it follows down, further out less)
+        const gap = new Int32Array(b.n).fill(1e6);   // nodes along the band to the nearest held one
+        for (let pass = 0; pass < 2; pass++) for (let i0 = 0; i0 < 2 * b.n; i0++) { const i = pass ? (2 * b.n - 1 - i0) % b.n : i0 % b.n, j = pass ? (i + 1) % b.n : (i - 1 + b.n) % b.n;
+          gap[i] = b.hold[i] ? 0 : Math.min(gap[i], gap[j] + 1); }
+        for (let i = 0; i < b.n; i++) if (!b.hold[i]) { const lift = dOut > 0 ? dOut : dOut * Math.exp(-gap[i] / 6);
+          b.x[3 * i] = P.x[3 * i]; b.x[3 * i + 1] = P.x[3 * i + 1] + lift; b.x[3 * i + 2] = P.x[3 * i + 2]; }
+        for (let i = 0; i < b.n; i++) if (!b.hold[i] || !b.hold[(i + 1) % b.n]) for (let d = 0; d < 4; d++) b.q[4 * i + d] = P.q[4 * i + d];
+        b.xp.set(b.x); b.qp.set(b.q); b.v.fill(0); b.om.fill(0);
+      }
+    }
+    this._pouchState = o.pouch ? (o.pouchOut ?? 5.5) : null;
+    const carried = !!prev;   // (carried on: no head start, it runs on in real time; a fresh build gets one)
+    if (o.pouch) {
+      // the part held in the pouch stays as packed; what is out of it is left to its own weight and stiffness: it
+      // settles here for up to half a second, then carries on live (a band pulled far out folds over the rim)
+      if (W.pinBelow > 1e8) { W.applyPins(); W.awake = false; }   // held whole: nothing to settle
+      const t0 = performance.now(); if (!carried) for (let k = 0; k < 400 && W.awake && performance.now() - t0 < 30; k++) W.step(1 / 60);   // (a short head start on a fresh build; it carries on live)
+      this.updateMeshes(); bandAO(this.meshes); this.aoDirty = false; this.pouch.settle(W, 35);   // (the cloth: settled from where it was, then on live)
+    }
   }
   // whether the print, at its spot, would read right to left (or upside down) from the camera: then it turns half a
   // turn on the band (the text's run goes along the band; its up is the band's d1 edge)
@@ -1336,12 +1533,12 @@ export class BandsRig {
     let best = 0, bv = -Infinity; const W = this.world;
     for (let s = 0; s < b.n; s++) {
       const f = W.segFrame(b, s), c = W.segCenter(b, s);
-      const v = kind === 'flat' ? f.d2[1] * 10 - Math.abs(c[0] - b.center()[0]) : kind === 'standing' ? f.d2[2] * 10 - Math.abs(c[0] - b.center()[0]) : f.d2[2] * 10 - Math.abs(c[1] - b.center()[1]) * 0.5;
+      const v = kind === 'pouch' ? -c[1] : kind === 'flat' ? f.d2[1] * 10 - Math.abs(c[0] - b.center()[0]) : kind === 'standing' ? f.d2[2] * 10 - Math.abs(c[0] - b.center()[0]) : f.d2[2] * 10 - Math.abs(c[1] - b.center()[1]) * 0.5;
       if (v > bv) { bv = v; best = s; }
     }
     return (best + 0.5) * b.l0;
   }
-  applyPrint() { for (const M of this.meshes) { const m = this.mats[M.band.key]; m.map = this.tex[M.band.key][this.opts.print]; m.needsUpdate = true; } }
+  applyPrint() { for (const M of this.meshes) { const m = this.mats[M.band.key]; m.map = this.opts.pouch ? null : this.tex[M.band.key][this.opts.print]; m.needsUpdate = true; } }   // (offline: no prints in the pouch scene, as in the product photo)
   // ------------------------------------------------ hooks drawn in the image, and the pin handles
   syncHooks() {
     for (const o of [...this.group.children]) if (o.userData.hook) this.group.remove(o);
@@ -1377,7 +1574,11 @@ export class BandsRig {
   }
   // ------------------------------------------------ per frame
   step() {
-    const W = this.world; if (!W.awake) return false;
+    const W = this.world;
+    if (!W.awake) {   // (the pouch's cloth may still be settling round bands that have come to rest)
+      if (this.opts.pouch && this.pouch && this.pouch.moving) { this.pouch.update(W, true); return true; }
+      return false;
+    }
     W.step(1 / 60);
     if (this.settleHeight && this.frame++ > 0) {   // keep the floating presets at their height while they form
       const low = this.lowest();
@@ -1386,6 +1587,7 @@ export class BandsRig {
     }
     this.placeHandles();
     this.updateMeshes();
+    if (this.opts.pouch && this.pouch) this.pouch.update(W);
     if (!W.awake) {
       bandAO(this.meshes); this.aoDirty = false;
     }
@@ -1403,9 +1605,10 @@ export class BandsRig {
     for (const c of W.clips) { for (const P of [c.p, c.cp]) if (P) { P[0] += dx; P[1] += dy; P[2] += dz; } if (c.tween) for (const P of [c.tween.p0, c.tween.p1]) { P[0] += dx; P[1] += dy; P[2] += dz; } }
     this.placeHandles(); this.updateMeshes();
   }
-  bounds() { const bb = new THREE.Box3(); for (const M of this.meshes) bb.union(M.geometry.boundingBox); return bb; }
+  bounds() { const bb = new THREE.Box3(); for (const M of this.meshes) bb.union(M.geometry.boundingBox); if (this.opts.pouch && this.pouch) bb.union(this.pouch.bounds()); return bb; }
   // ------------------------------------------------ pointer: pick, drag, pin
   pick(ray) {
+    if (this.opts.pouch) return null;   // the pouch scene is posed: nothing to drag
     const hp = ray.intersectObjects(this.helpers.children, false)[0];
     if (hp) return { pin: hp.object.userData.pin, point: hp.point };
     const hb = ray.intersectObjects(this.meshes.map((M) => M.mesh), false)[0];
