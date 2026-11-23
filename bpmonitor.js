@@ -212,17 +212,25 @@ function cuffCanvas(printImg) {
 // uneven in width, its twist showing as fine slanted ridges, loose fibre over it; as a normal map, a cavity map and a
 // roughness map (the yarns' crowns smoother than the hollows between them)
 function weaveMaps() {
+  // an oxford weave: the warp in pairs over and under a heavier weft (2 x 1), each yarn wandering a little and a
+  // little uneven along its length, its twist as fine slanted ridges, loose fibre over it all
   const N = 512, Y = 64, cell = N / Y, hgt = new Float32Array(N * N);
   let seed = 11; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  const thick = Array.from({ length: Y * 2 }, () => 0.82 + 0.3 * rnd()), noise = Float32Array.from({ length: N * N }, () => rnd());
+  const ph = Array.from({ length: Y * 4 }, () => rnd() * 6.283), wid = Array.from({ length: Y * 2 }, () => 0.85 + 0.25 * rnd());
+  const fuzz = new Float32Array(N * N); for (let k = 0; k < N * N; k++) fuzz[k] = rnd();
+  const blur = new Float32Array(N * N); for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let a = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) a += fuzz[((y + dy + N) % N) * N + ((x + dx + N) % N)]; blur[y * N + x] = a / 9; }
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    const i = Math.floor(x / cell), j = Math.floor(y / cell), fx = (x % cell + 0.5) / cell, fy = (y % cell + 0.5) / cell, warpUp = (i + j) % 2 === 0;
-    const across = warpUp ? fx : fy, along = warpUp ? fy : fx, w = thick[warpUp ? i : Y + j];
-    const prof = Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, (across - 0.5) / w + 0.5)))) ** 0.55;   // the yarn on top, rounded
-    const crown = 0.75 + 0.25 * Math.sin(Math.PI * along);                                                       // dipping where it goes under
-    const twist = 0.07 * Math.sin(2 * Math.PI * (across * 1.2 + along * 2.4));                                  // the twist's slanted ridges
-    const under = 0.25 * Math.max(0, Math.sin(Math.PI * along)) ** 0.6;                                         // the crossing yarn, below
-    hgt[y * N + x] = Math.max(under, prof * crown * (1 + twist)) + 0.05 * (noise[y * N + x] - 0.5);
+    const i = Math.floor(x / cell), j = Math.floor(y / cell), wy = (y / N) * 6.283, wx = (x / N) * 6.283;
+    // where each yarn's centre wanders, and how wide it is here
+    const cxw = (i + 0.5) * cell + 0.5 * Math.sin(3 * wy + ph[i]), cyw = (j + 0.5) * cell + 0.5 * Math.sin(3 * wx + ph[Y + j]);
+    const ww = wid[i] * (1 + 0.08 * Math.sin(5 * wy + ph[2 * Y + i])), wf = wid[Y + j] * 1.1 * (1 + 0.08 * Math.sin(5 * wx + ph[3 * Y + (j % Y)]));
+    const dw = (x - cxw) / (cell * 0.5 * ww), df = (y - cyw) / (cell * 0.5 * wf);
+    const warp = Math.max(0, 1 - dw * dw) ** 0.45, weft = Math.max(0, 1 - df * df) ** 0.45;
+    const warpUp = (Math.floor(i / 2) + j) % 2 === 0;
+    const fy = (y % cell) / cell, fx = (x % cell) / cell;
+    const warpH = warp * (warpUp ? 0.8 + 0.2 * Math.sin(Math.PI * fy) : 0.35), weftH = weft * (warpUp ? 0.35 : 0.8 + 0.2 * Math.sin(Math.PI * fx));
+    const top = Math.max(warpH, weftH), along = warpH > weftH ? y : x, across = warpH > weftH ? dw : df;
+    hgt[y * N + x] = top * (1 + 0.06 * Math.sin(along * 1.9 + across * 2.2)) + 0.07 * (blur[y * N + x] - 0.5) + 0.03 * (fuzz[y * N + x] - 0.5);
   }
   const mk = () => { const c = document.createElement('canvas'); c.width = c.height = N; return c; };
   const nc = mk(), ac = mk(), rc = mk(), nd = nc.getContext('2d').createImageData(N, N), ad = ac.getContext('2d').createImageData(N, N), rd = rc.getContext('2d').createImageData(N, N);
@@ -272,9 +280,9 @@ export function createBPMaterials(maxAniso = 8) {
   const pimg = new Image();
   pimg.onload = () => { cuffTex.image = cuffCanvas(pimg); cuffTex.needsUpdate = true; MM.onChange?.(); };
   pimg.src = new URL('./assets/cuff-print.png', import.meta.url).href;
-  const wv = weaveMaps(), tile = (cv) => { const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(9, 7); t.anisotropy = maxAniso; return t; };
-  MM.fabric = new THREE.MeshPhysicalMaterial({ map: cuffTex, normalMap: tile(wv.normal), normalScale: new THREE.Vector2(0.75, 0.75), aoMap: tile(wv.cavity), aoMapIntensity: 0.8, roughnessMap: tile(wv.rough),
-    roughness: 1, metalness: 0, sheen: 1, sheenRoughness: 0.38, sheenColor: new THREE.Color('#b9bbc0'), specularIntensity: 0.28, side: THREE.DoubleSide });
+  const wv = weaveMaps(), tile = (cv) => { const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(9, 7); t.anisotropy = Math.min(4, maxAniso); return t; };   // a little anisotropic filtering only: the weave melts into sheen at grazing angles, as cloth does
+  MM.fabric = new THREE.MeshPhysicalMaterial({ map: cuffTex, normalMap: tile(wv.normal), normalScale: new THREE.Vector2(0.6, 0.6), aoMap: tile(wv.cavity), aoMapIntensity: 0.75, roughnessMap: tile(wv.rough),
+    roughness: 1, metalness: 0, sheen: 1, sheenRoughness: 0.45, sheenColor: new THREE.Color('#c2c4c9'), specularIntensity: 0.22, side: THREE.DoubleSide });
   // where the hose goes into the cuff: a moulded rubber boot
   MM.boot = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#6b6d72'), roughness: 0.55, metalness: 0, clearcoat: 0.15, clearcoatRoughness: 0.4 });
   MM.cuffInner = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#2e2f32'), roughness: 0.95, side: THREE.DoubleSide });
@@ -283,7 +291,17 @@ export function createBPMaterials(maxAniso = 8) {
     let sd = 5; const rn = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
     for (let y = 0; y < 512; y += 1 + Math.floor(rn() * 6)) { const d = (rn() - 0.5) * 22; g.fillStyle = `rgb(128,${Math.round(128 + d)},255)`; g.fillRect(0, y, 16, 1); } }
   const tN = new THREE.CanvasTexture(tl); tN.wrapS = tN.wrapT = THREE.RepeatWrapping; tN.anisotropy = maxAniso;   // faint extrusion lines along the hose (constant along it)
-  MM.tube = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#8e9095'), roughness: 0.42, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.22, specularIntensity: 0.5, normalMap: tN, normalScale: new THREE.Vector2(0.25, 0.25) });
+  // its surface not quite even: soft patches a little rougher or smoother along it (handling, the extrusion)
+  const tr = document.createElement('canvas'); tr.width = 256; tr.height = 64; { const g = tr.getContext('2d'); g.fillStyle = '#d0d0d0'; g.fillRect(0, 0, 256, 64);
+    let sd = 9; const rn = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+    for (let k = 0; k < 140; k++) { const x = rn() * 256, y = rn() * 64, rx = 6 + rn() * 30, ry = 3 + rn() * 12, v = Math.round(170 + rn() * 85);
+      for (const dx of [-256, 0, 256]) for (const dy of [-64, 0, 64]) { const gr = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, rx); gr.addColorStop(0, `rgba(${v},${v},${v},0.35)`); gr.addColorStop(1, `rgba(${v},${v},${v},0)`);
+        g.save(); g.translate(x + dx, y + dy); g.scale(1, ry / rx); g.translate(-(x + dx), -(y + dy)); g.fillStyle = gr; g.fillRect(x + dx - rx, y + dy - rx, 2 * rx, 2 * rx); g.restore(); } } }
+  const tR = new THREE.CanvasTexture(tr); tR.wrapS = tR.wrapT = THREE.RepeatWrapping; tR.repeat.set(8, 1);
+  // grey PVC: satin, its highlight drawn out along the hose (extruded plastic is a little anisotropic), a thin
+  // glossier skin over it
+  MM.tube = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#8e9095'), roughness: 0.5, roughnessMap: tR, metalness: 0, anisotropy: 0.45, clearcoat: 0.22, clearcoatRoughness: 0.28,
+    specularIntensity: 0.5, sheen: 0.25, sheenRoughness: 0.6, sheenColor: new THREE.Color('#c4c6ca'), normalMap: tN, normalScale: new THREE.Vector2(0.3, 0.3) });
   MM.plug = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#b9bbbf'), roughness: 0.3, metalness: 0, clearcoat: 0.4, clearcoatRoughness: 0.18, specularIntensity: 0.55 });
   return MM;
 }
@@ -451,8 +469,8 @@ function poseInFrame(grp, pose, withCuff, MM) {
   // inside the wall) in the group's frame, and puts a rubber boot round the joint
   cuff.updateMatrixWorld(true);
   const Lin = CUFF_LAYERS[2], toG = (v) => v.clone().applyMatrix4(cuff.matrixWorld), dirG = (v) => v.clone().applyQuaternion(cuff.quaternion).normalize();
-  const port = (th, y, dl) => {
-    const Q = cuffPoint(Lin, th, y, -C.t), d = dl.clone().normalize();
+  const port = (th, y, dl, L = Lin, dr = -C.t) => {   // (L, dr: the inner wall by default; the outer turn's face with CUFF_LAYERS[0], 0)
+    const Q = cuffPoint(L, th, y, dr), d = dl.clone().normalize();
     const boot = new THREE.Mesh(bootGeometry(r), MM ? MM.boot : mat); boot.name = 'bp-tube-boot'; boot.castShadow = true;
     boot.position.copy(toG(Q.clone().addScaledVector(d, -0.15))); boot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirG(d)); tubes.add(boot);
     return [toG(Q.clone().addScaledVector(d, -0.9)), toG(Q.clone().addScaledVector(d, -0.2)), toG(Q.clone().addScaledVector(d, 0.6))];
@@ -484,11 +502,11 @@ function poseInFrame(grp, pose, withCuff, MM) {
     const mx = bx + 0.8, zc = O.z, ax = mx - O.x, az = Math.max(4.0, b.max.z + 3.0 - zc);
     const ov = (deg) => { const a = (deg * Math.PI) / 180, w = 1 + 0.035 * Math.sin(3 * a + 1.1) * Math.sin((Math.PI * (deg + 50)) / 230); return V(mx + ax * w * Math.cos(a), fl, zc + az * w * Math.sin(a)); };   // no wobble at its ends
     const s0 = ov(-50), s1 = ov(-44), td = s1.clone().sub(s0).normalize();
-    // its end tucked inside the cuff's wall at the floor, on its front right, coming out under the bottom edge
-    const thw = (50 * Math.PI) / 180, ow = new THREE.Vector3(Math.cos(thw), 0, Math.sin(thw));
-    const Pw = cuffPoint(CUFF_LAYERS[0], thw, r + 0.005, -0.5).add(cuff.position), Pout = Pw.clone().addScaledVector(ow, 1.4);
-    Pw.y = Pout.y = fl;
-    loop.push(Pw, Pout);
+    // out through a booted port in the cuff's outer face, low on its front right (as a real cuff's hose leaves it),
+    // dipping straight down to the floor
+    const thw = (48 * Math.PI) / 180, ow = new THREE.Vector3(Math.cos(thw), 0, Math.sin(thw)), yp = 1.25;
+    const po = port(thw, yp, new THREE.Vector3(Math.cos(thw), -0.25, Math.sin(thw)), CUFF_LAYERS[0], 0), q0 = po[2];
+    loop.push(...po, V(q0.x + ow.x * 0.7, fl + 0.22, q0.z + ow.z * 0.7), V(q0.x + ow.x * 1.8, fl, q0.z + ow.z * 1.8));
     for (let k = 0; k < 22; k++) loop.push(ov(-50 + (230 * k) / 22));
   } else {
     // out of the roll's open end, down to the floor, forward along the left, a hook round in front of the monitor's
