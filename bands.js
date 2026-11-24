@@ -31,6 +31,17 @@ const MU_OBJ = 0.7;                                      // latex on the other d
 // substeps rather than in one jump (which the solver turned into a fling); a point touching a device moves no faster
 // than OBJ_VMAX (cm/s) away from it, and no band point faster than VMAX (a safety net against wild throws)
 const OBJ_PUSH = 0.2, OBJ_VMAX = 35, VMAX = 260, OBJ_DAMP = 0.7;
+// A clip holds the band's direction where it holds it (fingers pinching it), except a pin the user left on a band:
+// that holds only its point, and the band turns freely through it (stretched round two or three pins, a band held
+// their direction and folded back on itself at each, knife-edged). Turned by hand (scroll), a pin holds its new turn
+// for a moment (hold frames)
+const pinHolds = (c) => !c.user || c.temp || !!c.tween || c.hold > 0;
+// out-of-plane bending stiffness, times the bare strip's (see Band), by layout: bands standing on their edge are firm
+// (soft, a stood band curled into scrolls and folded on itself at a touch); every other layout keeps the bare strip's,
+// which the flat folds need (firmer, a band laid flat sprang up on its edge instead)
+let BEND_FIRM = 1;
+const BEND_FIRM_STANDING = 16;
+const CLIP_STEP = 1.2;   // cm a frame: how fast a band held by the hand follows it
 const SUB = 3;                                           // render stations per segment
 // the segments' turning inertia, x10: with their true (tiny) inertia the bending and shear constraints pump energy
 // into the rotations; heavier rotations are stable and change only how fast a twist swings, not the shapes
@@ -166,7 +177,8 @@ class Band {
     // (capped at 60 times: at 150 a pile of bands on the floor could buzz and never come to rest)
     this.KT = (27 * this.W ** 4) / (160 * this.t ** 2);
     // bending about d1 (out of the band's plane), about d2 (within it), twist about d3
-    this.aB = [this.l0 / (4 * E * this.W * this.t ** 3 / 12), this.l0 / (4 * E * this.t * this.W ** 3 / 12), this.l0 / (4 * G_MOD * this.W * this.t ** 3 / 3)];
+    // (out of its plane, BEND_FIRM times the bare strip's: see BEND_FIRM)
+    this.aB = [this.l0 / (4 * BEND_FIRM * E * this.W * this.t ** 3 / 12), this.l0 / (4 * E * this.t * this.W ** 3 / 12), this.l0 / (4 * G_MOD * this.W * this.t ** 3 / 3)];
     this.setRest(ellipseLoop(n, BAND.C, REST_ASPECT), true);
   }
   // the shape the band springs back to (its rest curvature: Darboux quaternions between segments), from a planar loop;
@@ -226,6 +238,12 @@ export class BandWorld {
 
   // ---------------------------------------------------------------- stepping
   step(dt = 1 / 60) {
+    // a band held by the hand follows it, but no faster than CLIP_STEP a frame: yanked several centimetres in one
+    // frame, it went straight through the band beside it, and the two stayed locked through each other
+    for (const c of this.clips) if (c.goal) {
+      const d = [c.goal[0] - c.p[0], c.goal[1] - c.p[1], c.goal[2] - c.p[2]], L = Math.hypot(...d);
+      if (L > 1e-4) { const k = Math.min(1, CLIP_STEP / L); c.p = [c.p[0] + d[0] * k, c.p[1] + d[1] * k, c.p[2] + d[2] * k]; this.awake = true; this.calm = 0; }
+    }
     if (!this.awake) return false;
     for (const c of this.clips) if (c.tween) {   // a clip easing to a new position / angle
       const T = c.tween; T.k = Math.min(1, T.k + dt / T.dur); const e = T.k * T.k * (3 - 2 * T.k);
@@ -238,6 +256,7 @@ export class BandWorld {
       for (let i = 0; i < 3; i++) { h.a[i] = T.a0[i] + (T.a1[i] - T.a0[i]) * e; h.b[i] = T.b0[i] + (T.b1[i] - T.b0[i]) * e; }
       if (T.k >= 1) h.tween = null;
     }
+    for (const c of this.clips) if (c.hold > 0) c.hold--;   // a pin turned by hand holds its turn a moment
     this.applyPins();
     this.broadphase();
     for (const b of this.bands) { (b._x0 ??= new Float64Array(b.x.length)).set(b.x); (b._q0 ??= new Float64Array(b.q.length)).set(b.q); }
@@ -259,6 +278,7 @@ export class BandWorld {
       }
       for (const c of this.clips) c.sp = c.fp.map((v, i) => v + (c.cp[i] - v) * t);
       this.substep(h);
+      if ((this.moved || 0) > 0.4 && s % 4 === 3 && s < S - 1) this.broadphase();   // moving fast: the near pairs again
     }
     // a safety net: should a band ever blow up (a value gone infinite or NaN, after some wild drag), it goes back to
     // where it was at the frame's start, at rest, rather than vanishing and taking the floor shadow with it
@@ -300,7 +320,7 @@ export class BandWorld {
       if (!b.hold) { b.hold = new Uint8Array(b.n); for (let i = 0; i < b.n; i++) b.hold[i] = b.x[3 * i + 1] < this.pinBelow ? 1 : 0; }
       for (let i = 0; i < b.n; i++) if (b.hold[i]) { b.iw[i] = 0; if (b.hold[(i + 1) % b.n]) { b.iwr[i] = 0; b.pin[i] = 1; } }
     }
-    for (const c of this.clips) { const b = c.band, n = b.n; b.iw[c.seg] = 0; b.iw[(c.seg + 1) % n] = 0; b.iwr[c.seg] = 0; b.pin[c.seg] = 1; }
+    for (const c of this.clips) { const b = c.band, n = b.n; b.iw[c.seg] = 0; b.iw[(c.seg + 1) % n] = 0; if (pinHolds(c)) { b.iwr[c.seg] = 0; b.pin[c.seg] = 1; } }
   }
   substep(h) {
     this.flip = !this.flip;
@@ -316,10 +336,10 @@ export class BandWorld {
     }
     // clips follow their targets (kinematic)
     for (const c of this.clips) {
-      const b = c.band, n = b.n, a = c.seg, e = (a + 1) % n, f = frameOf(c.q, this._f, 0), L = b.l0 / 2;
+      const held = pinHolds(c), b = c.band, n = b.n, a = c.seg, e = (a + 1) % n, f = held ? frameOf(c.q, this._f, 0) : frameOf(b.q, this._f, 4 * a), L = b.l0 / 2;
       const cp = c.sp || c.p;
       for (let k = 0; k < 3; k++) { b.x[3 * a + k] = cp[k] - f[6 + k] * L; b.x[3 * e + k] = cp[k] + f[6 + k] * L; }
-      b.q.set(c.q, 4 * a);
+      if (held) b.q.set(c.q, 4 * a); else c.q = Array.from(b.q.slice(4 * a, 4 * a + 4));   // (a free pin: its turn is the band's)
     }
     for (const b of this.bands) { this.bend(b, h); this.stretch(b, h); }
     // the loop's length and the hooks / floor pull against each other (a stretched band round a hook): alternate them
@@ -814,8 +834,12 @@ export class BandWorld {
     for (let k = 0; k < 3; k++) { const d = [dx, dy, dz][k] * lam; b.x[3 * a + k] += wa * d; b.x[3 * c + k] += wc * d; }
   }
   // once a step: segment pairs close enough to touch (each band against itself and the others)
+  // Which segments of the bands may touch this frame: those within a margin of each other. The margin grows with how
+  // fast the bands moved last frame (a fixed 8 mm let a band dragged at an ordinary pace pass right through another,
+  // and once through they stayed locked through each other); moving fast, the list is made again mid-frame too (step)
   broadphase() {
-    const R = BAND.W + 0.6, R2 = R * R, cell = R, grid = new Map(), f = this._f, g = this._g;
+    const mg = Math.min(4, 0.8 + 2.5 * (this.moved || 0)); this._mg = mg;
+    const R = BAND.W + 0.6 + mg, R2 = R * R, cell = R, grid = new Map(), f = this._f, g = this._g;
     const K = (i, j, k) => (i + 512) * 1048576 + (j + 512) * 1024 + (k + 512);
     for (const b of this.bands) {
       b.cc ??= new Float64Array(3 * b.n);
@@ -851,7 +875,8 @@ export class BandWorld {
     for (let k = -1; k <= 1; k++) {
       const px = A.cc[3 * s] + k * hw * g[0] - bx, py = A.cc[3 * s + 1] + k * hw * g[1] - by, pz = A.cc[3 * s + 2] + k * hw * g[2] - bz;
       const pu = px * f[0] + py * f[1] + pz * f[2], pv = px * f[6] + py * f[7] + pz * f[8], ph = px * f[3] + py * f[4] + pz * f[5];
-      if (Math.abs(pu) < B.W / 2 + 0.4 && Math.abs(pv) < B.l0 / 2 + 0.4 && Math.abs(ph) < 0.8) return true;
+      const mg = this._mg || 0.8;
+      if (Math.abs(pu) < B.W / 2 + 0.4 + mg / 2 && Math.abs(pv) < B.l0 / 2 + 0.4 + mg / 2 && Math.abs(ph) < mg) return true;
     }
     return false;
   }
@@ -1474,6 +1499,7 @@ export class BandsRig {
     // (the pouch: what the bands were a moment ago, so a change of the slider carries them on from there rather than
     // starting them again: pulled out, a band rides up as it was, its free end swinging on, not thrown about anew)
     const prev = o.pouch && this._pouchState && W.bands.length ? { out: this._pouchState, bands: new Map(W.bands.map((b) => [b.key, { x: b.x.slice(), q: b.q.slice(), hold: b.hold }])) } : null;
+    BEND_FIRM = o.pos === 'surface' && o.lay === 'standing' && !o.pouch ? BEND_FIRM_STANDING : 1;   // (read as each band is made)
     W.clear(); W.gravity = o.pos === 'floating' && !o.gravity && !o.pouch ? 0 : 1; W.floorY = 0;
     if (o.pouch && !this.pouch) this.pouch = new Pouch();
     if (o.pouch) { const out = o.pouchOut ?? 5.5; this.pouch.top = POUCH.H + out; this.pouch.close = 0.5 * smooth01((-0.5 - out) / 3.5); }   // drawn in a little as the bands go below the neck
@@ -1808,7 +1834,7 @@ export class BandsRig {
     } else {
       const target = p.clone().add(D.off);
       if (target.y < this.world.floorY + 0.15) target.y = this.world.floorY + 0.15;
-      D.clip.p = target.toArray();
+      D.clip.goal = target.toArray();   // (followed at a band's pace: see BandWorld.step)
     }
     W.wake();
   }
@@ -1818,7 +1844,7 @@ export class BandsRig {
     if (target.clip) {
       const c = target.clip, f = W.segFrame(c.band, c.seg), axis = twist ? new THREE.Vector3(...f.d3) : viewDir.clone();
       const q = new THREE.Quaternion().setFromAxisAngle(axis.normalize(), angle).multiply(new THREE.Quaternion(...c.q));
-      c.q = [q.x, q.y, q.z, q.w]; c.tween = null;
+      c.q = [q.x, q.y, q.z, q.w]; c.tween = null; c.hold = 40;
     } else if (target.hook) {
       const h = target.hook, m = new THREE.Vector3(...h.a).add(new THREE.Vector3(...h.b)).multiplyScalar(0.5);
       const R = new THREE.Quaternion().setFromAxisAngle(twist ? new THREE.Vector3(0, 1, 0) : viewDir.clone().normalize(), angle);
@@ -1829,7 +1855,7 @@ export class BandsRig {
   }
   endDrag(pin) {
     const D = this.drag; this.drag = null; if (!D) return;
-    if (D.clip) { if (pin) { D.clip.temp = false; this.syncHooks(); } else this.world.removeClip(D.clip); }
+    if (D.clip) { if (pin) { D.clip.temp = false; D.clip.user = true; this.syncHooks(); } else this.world.removeClip(D.clip); }
     this.world.wake();
   }
   removePin(P) {

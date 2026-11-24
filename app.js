@@ -124,6 +124,24 @@ controls.maxPolarAngle = Math.PI;
 controls.minDistance = 8;
 controls.maxDistance = 600;
 controls.zoomSpeed = 0.8;
+// Space held: a left-drag in the view pans the camera (slides it across and up or down, keeping its angle), as in
+// design tools. (Not while typing in a field)
+let spaceDown = false;
+const typingInField = () => { const a = document.activeElement; return !!a && ((a.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(a.type)) || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable); };
+function setSpace(on) {
+  spaceDown = on;
+  controls.mouseButtons.LEFT = on ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+  renderer.domElement.style.cursor = on ? 'grab' : '';
+}
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || typingInField()) return;
+  e.preventDefault();   // (no page scroll, no pressing the focused button)
+  if (!spaceDown) setSpace(true);
+});
+window.addEventListener('keyup', (e) => { if (e.code === 'Space' && spaceDown) { e.preventDefault(); setSpace(false); } });
+window.addEventListener('blur', () => { if (spaceDown) setSpace(false); });
+renderer.domElement.addEventListener('pointerdown', () => { if (spaceDown) renderer.domElement.style.cursor = 'grabbing'; });
+window.addEventListener('pointerup', () => { if (spaceDown) renderer.domElement.style.cursor = 'grab'; });
 
 // ---------------------------------------------------------------- model
 const M = createMaterials();
@@ -2050,7 +2068,7 @@ function rayAt(e) {
 }
 let bandDrag = null, hoverPin = null;
 stage.addEventListener('pointerdown', (e) => {
-  if (!isBands() || e.button !== 0) return;
+  if (!isBands() || e.button !== 0 || spaceDown) return;
   const hit = bandsRig.pick(rayAt(e));
   if (!hit) return;
   e.stopPropagation(); e.preventDefault();
@@ -2112,7 +2130,7 @@ function pickMember(r) {
   return null;
 }
 stage.addEventListener('pointerdown', (e) => {
-  if (!comboOn() || e.button !== 0 || bandDrag) return;
+  if (!comboOn() || e.button !== 0 || bandDrag || spaceDown) return;
   const hit = pickMember(rayAt(e));
   if (!hit) return;
   e.stopPropagation(); e.preventDefault();
@@ -2145,7 +2163,7 @@ stage.addEventListener('pointermove', (e) => {
 let hoverT = 0;
 stage.addEventListener('pointermove', (e) => {
   if (!comboOn()) { if (renderer.domElement.style.cursor) renderer.domElement.style.cursor = ''; return; }
-  if (objDrag || bandDrag || e.buttons) return;
+  if (objDrag || bandDrag || e.buttons || spaceDown) return;
   const now = performance.now(); if (now - hoverT < 80) return; hoverT = now;
   const hit = pickMember(rayAt(e));
   renderer.domElement.style.cursor = hit && !(hit.d === 'bands' && isBands()) ? 'move' : '';
