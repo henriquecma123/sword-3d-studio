@@ -17,6 +17,25 @@ import { drawScoreBar, drawPill, PILL_MAX, scoreBarFonts } from './scorebar.js';
 import { drawPhoneScreen } from './phoneui.js';
 import { createPhoenix, PHOENIX_MAX } from './phoenix.js';
 
+// Glass and screens (materials marked with the GLASS_REFLECT define, see markGlass) are near mirrors: their
+// reflections come only from the studio environment (a 1024 px cube, so the softboxes show crisp and smooth). The
+// direct lights' own highlights are left off them: the softboxes' area lights are drawn with a coarse lookup table
+// that, on a mirror, smears into a blurred, stepped blob, and the key's directional light a pin-point glint that no
+// studio photo shows. Everything else is lit as before.
+{
+  const C = THREE.ShaderChunk;
+  let s = C.lights_physical_pars_fragment;
+  const rect = 'reflectedLight.directSpecular += lightColor * fresnel * LTC_Evaluate( normal, viewDir, position, mInv, rectCoords );';
+  const ccDir = 'clearcoatSpecularDirect += ccIrradiance * BRDF_GGX_Clearcoat( directLight.direction, geometryViewDir, geometryClearcoatNormal, material );';
+  const dir = 'reflectedLight.directSpecular += irradiance * BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, material );';
+  for (const line of [rect, ccDir, dir]) {
+    if (!s.includes(line)) { console.warn('glass reflections: three.js shader changed, patch skipped'); s = null; break; }
+    s = s.replace(line, `#ifndef GLASS_REFLECT\n${line}\n#endif`);
+  }
+  if (s) C.lights_physical_pars_fragment = s;
+}
+const markGlass = (...mats) => { for (const m of mats) { if (!m) continue; m.defines = { ...(m.defines || {}), GLASS_REFLECT: '' }; m.needsUpdate = true; } };
+
 const $ = (s) => document.querySelector(s);
 const DEG = Math.PI / 180;
 
@@ -40,6 +59,11 @@ const state = {
   bpReading: 'high',          // its LCD: high (138/88) | low (105/68) | custom (the fields)
   scaleReading: '185.0',      // the scale's display: any digits, one decimal point
   bloomLight: false,          // Bloom pod: its light on or off (the renders show both)
+  comboOn: false,             // several devices in one shot: this one (device) with the others ticked (combo)
+  combo: [],
+  comboGap: 4,                // cm between them in a row (Arrange in a row)
+  comboPos: {},               // each one's place: { x, z (its centre on the floor, cm), rot (turned, degrees) }
+  comboStack: [],             // the order they were last put down in (the last one lands on top)
   blockPose: 'standing',      // yoga block: standing (on its long side, as in its renders) | flat (logo up) | end (on its end)
   finish: 'white',            // iPhone finish
   stand: true,
@@ -124,6 +148,7 @@ const BPM = createBPMaterials(maxAniso);   // the blood pressure monitor: built 
 const bp = buildBPMonitor(BPM);
 BPM.onChange = () => requestRender();
 const GLM = createGlucoMaterials(maxAniso);   // the glucometer: built in code from its product images (glucometer.js)
+markGlass(M.glass, M.screen, P.screen, SCM.top, SCM.edge, BPM.face, GLM.face);   // the screens and glass faces
 const gluco = buildGlucometer(GLM);
 GLM.onChange = () => requestRender();
 const model = new THREE.Group();
@@ -260,30 +285,335 @@ function poseBlockStudio() {
 }
 
 // the box: floating as in the mockup (its pose and height over the floor), or resting lid up on the floor
-function poseBox() {
+function poseBox(rest = false) {   // (rest: in a combined shot it rests on what is under it, as everything there does)
   const m = box.getObjectByName('box');
-  if (state.boxPose === 'resting') { m.quaternion.identity(); m.position.set(0, BOX.H / 2 + 0.001, 0); }
+  if (rest || state.boxPose === 'resting') { m.quaternion.identity(); m.position.set(0, BOX.H / 2 + 0.001, 0); }
   else { m.quaternion.set(...BOX_SCENE.front.q); m.position.set(...BOX_SCENE.front.p); }
   box.updateMatrixWorld(true);
 }
 
-function applyPose() {
+// the Thrive Pad: in its stand, upright on its edge, or lying on its back (screen up, top edge away from the viewer)
+function posePad() {
   const { H, T } = DIM;
-  tablet.visible = isPad();
-  phone.visible = isPhone();
-  box.visible = isBox();
-  mband.visible = isMBand();
-  block.visible = isBlock();
-  bloom.visible = isBloom();
-  scale.visible = isScale();
-  bp.visible = isBP();
-  gluco.visible = isGluco();
-  bandsRig.group.visible = isBands(); applyBandAids();
-  stand.visible = isPad() && state.stand;
   tablet.rotation.set(0, 0, 0);
+  if (state.stand) tablet.position.set(0, DIM.stand.slotFloor + H / 2, -T / 2);
+  else if (state.pose === 'upright') tablet.position.set(0, H / 2 + 0.001, -T / 2);
+  else { tablet.rotation.x = -Math.PI / 2; tablet.position.set(0, 0.001, 0); }
+}
+
+// ---------------------------------------------------------------- several devices in one shot
+// The device being edited (state.device) and the others ticked under Combine share the floor. Each keeps its own pose
+// and options (pick it in the grid, or click it in the view, to change them) and has its own place: where its centre
+// stands on the floor and how far it is turned (state.comboPos). Drag one in the view to move it, scroll as you drag
+// to turn it.
+// Physics: each device is solid, a few oriented boxes fitted to its parts (obbsOf). Dropped, it comes down onto the
+// floor or onto whatever is under it, devices placed before it first (state.comboStack: the last one moved is
+// dropped last, so it lands on top); one moved into another is pushed out sideways. Take one from under another and
+// that one falls. The bands are simulated: the devices are obstacles in their simulation, so they drape over them.
+// Only the placements are worked out as you drag (no re-posing), so a drag stays light.
+const COMBO_ORDER = ['pad', 'iphone', 'box', 'bands', 'block', 'bloom', 'mband', 'scale', 'bp', 'gluco'];   // the device grid's order
+const COMBO_NAMES = { pad: 'Thrive Pad', iphone: 'Vision AI', bloom: 'Sword pod', box: 'Box', bands: 'Bands', block: 'Yoga block', mband: 'M-Band', scale: 'Scale', bp: 'BP monitor', gluco: 'Glucometer' };
+const comboOn = () => state.comboOn && state.combo.some((d) => d !== state.device);
+const members = () => (comboOn() ? COMBO_ORDER.filter((d) => d === state.device || state.combo.includes(d)) : [state.device]);
+const bandsIn = () => members().includes('bands');
+const GROUP_OF = { pad: () => [tablet, stand], iphone: () => [phone], box: () => [box], bands: () => [], mband: () => [mband], block: () => [block], bloom: () => [bloom], scale: () => [scale], bp: () => [bp], gluco: () => [gluco] };
+const POSER = { pad: posePad, iphone: posePhone, box: () => poseBox(true), bands: () => {}, mband: poseMBandStudio, block: poseBlockStudio, bloom: poseBloomStudio, scale: poseScaleStudio, bp: poseBPStudio, gluco: poseGlucoStudio };
+// where each group was built: put back before posing (a combined shot moves and turns them). Recorded the first time
+// each is seen: the stand is a stand-in until its worker has meshed it, then replaced
+const HOME = new Map();
+const homeObjects = () => [tablet, stand, phone, box, mband, block, bloom, scale, bp, gluco, bandsRig.group, bandsRig.helpers];
+function restoreHome() {
+  for (const o of homeObjects()) {
+    if (!HOME.has(o)) HOME.set(o, [o.position.clone(), o.quaternion.clone(), o.scale.clone()]);
+    const [p, q, k] = HOME.get(o); o.position.copy(p); o.quaternion.copy(q); o.scale.copy(k);
+  }
+}
+const comboBase = {};                       // each device as posed, before it is placed: its parts, centre, size
+const _invBand = new THREE.Matrix4(), _qInvBand = new THREE.Quaternion();
+// in a combined shot the bands' rig (bands, pouch, hooks) is shown at this scale beside the other devices, so they
+// read in proportion to them (its simulation runs in its own frame, unscaled; the devices are scaled into it)
+const BANDS_IN_SCENE = 0.6;
+let bandsPlaced = '';                       // the bands' last placement (to tell when they are moved)
+function snapshotCombo() {
+  model.updateMatrixWorld(true);
+  for (const d of members()) {
+    if (d === 'bands') { snapshotBands(); continue; }
+    const b = boundsOfDevice(d);
+    comboBase[d] = { parts: GROUP_OF[d]().map((o) => [o, o.position.clone(), o.quaternion.clone()]), c: b.getCenter(new THREE.Vector3()), s: b.getSize(new THREE.Vector3()) };
+  }
+}
+// the bands are simulated in their own frame (their floor y = 0); in a combined shot the whole rig (bands, pouch,
+// hooks, pins) is carried and turned as one: the rig's group is placed, never the simulation
+function snapshotBands() {
+  const b = bandsRig.bounds(), e = b.isEmpty();
+  comboBase.bands = { parts: [], c: e ? new THREE.Vector3() : b.getCenter(new THREE.Vector3()), s: (e ? new THREE.Vector3(20, 10, 20) : b.getSize(new THREE.Vector3())).multiplyScalar(BANDS_IN_SCENE) };
+}
+function bandFrame() { bandsRig.group.updateMatrixWorld(true); _invBand.copy(bandsRig.group.matrixWorld).invert(); _qInvBand.copy(bandsRig.group.quaternion).invert(); }
+const toBandLocal = (v) => { bandFrame(); return v.applyMatrix4(_invBand); };
+const toBandLocalDir = (v) => { bandFrame(); return v.applyQuaternion(_qInvBand); };
+// a device's boxes in the bands' frame
+function obbToBand(o) {
+  const c = new THREE.Vector3(...o.c).applyMatrix4(_invBand), A = [], lo = [], hi = [], k = bandsRig.group.scale.x, h = o.h.map((v) => v / k);
+  for (let k = 0; k < 3; k++) { const a = new THREE.Vector3(o.ax[3 * k], o.ax[3 * k + 1], o.ax[3 * k + 2]).applyQuaternion(_qInvBand); A.push(a.x, a.y, a.z); }
+  const C = [c.x, c.y, c.z];
+  for (let j = 0; j < 3; j++) { const r = Math.abs(A[j]) * h[0] + Math.abs(A[3 + j]) * h[1] + Math.abs(A[6 + j]) * h[2]; lo.push(C[j] - r); hi.push(C[j] + r); }
+  return { ...o, c: C, ax: A, h, lo, hi };
+}
+// the pouch, in a combined shot, is solid to the other devices (one box round it); loose bands are not: they are
+// soft, and the devices push them aside in their simulation
+function bandsSolid() {
+  if (!bandsIn() || !bandsRig.opts.pouch || !bandsRig.pouch) return [];
+  const b = bandsRig.pouch.bounds().clone().applyMatrix4(bandsRig.group.matrixWorld), c = b.getCenter(new THREE.Vector3()), h = b.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+  return [{ c: [c.x, c.y, c.z], ax: [1, 0, 0, 0, 1, 0, 0, 0, 1], h: [h.x, h.y, h.z], lo: [b.min.x, b.min.y, b.min.z], hi: [b.max.x, b.max.y, b.max.z], d: 'bands', v: h.x * h.y * h.z }];
+}
+// a row in the grid's order, comboGap apart (the starting layout, and "Arrange in a row")
+function arrangeRow() {
+  const ds = members(), w = ds.map((d) => comboBase[d]?.s.x ?? 10);
+  let x = -(w.reduce((t, v) => t + v, 0) + state.comboGap * (ds.length - 1)) / 2;
+  ds.forEach((d, i) => { state.comboPos[d] = { x: x + w[i] / 2, z: 0, rot: 0 }; x += w[i] + state.comboGap; });
+  state.comboStack = [];
+}
+// a device added to the shot: to the right of the others
+function ensurePlaces() {
+  const ds = members();
+  if (ds.every((d) => !state.comboPos[d])) return arrangeRow();
+  for (const d of ds) if (!state.comboPos[d]) {
+    let right = -Infinity;
+    for (const e of ds) if (state.comboPos[e] && e !== d) right = Math.max(right, state.comboPos[e].x + (comboBase[e]?.s.x ?? 10) / 2);
+    state.comboPos[d] = { x: right + state.comboGap + (comboBase[d]?.s.x ?? 10) / 2, z: 0, rot: 0 };
+  }
+}
+const _Y = new THREE.Vector3(0, 1, 0), _qy = new THREE.Quaternion();
+function placeCombo() {
+  const ds = members();
+  ensurePlaces();
+  for (const d of ds) {
+    const B = comboBase[d], P = state.comboPos[d];
+    if (!B) continue;
+    if (d === 'bands') continue;   // (after the others: see below)
+    _qy.setFromAxisAngle(_Y, (P.rot || 0) * DEG);
+    for (const [o, p0, q0] of B.parts) {
+      o.position.copy(p0).sub(B.c).applyQuaternion(_qy).add(B.c);
+      o.position.x += P.x - B.c.x; o.position.z += P.z - B.c.z;
+      o.quaternion.copy(q0).premultiply(_qy);
+    }
+  }
+  placeBandsRig();
+  model.updateMatrixWorld(true);
+  // the pouch is solid: the devices are put down round it, unless it was the last thing moved: then it is the one
+  // that gives way (pushed clear of the devices)
+  const pouchLast = state.comboStack[state.comboStack.length - 1] === 'bands';
+  settleCombo(ds.filter((d) => d !== 'bands' && comboBase[d]), !pouchLast);
+  model.updateMatrixWorld(true);
+  if (pouchLast && bandsSolid().length) {
+    const devs = ds.filter((d) => d !== 'bands').flatMap(obbsOf), P = state.comboPos.bands;
+    const f = freePlace(bandsSolid(), devs, true);   // (the pouch stands on the floor: only its sideways place is taken)
+    P.x += f.dx; P.z += f.dz; placeBandsRig(); bandsRig.group.updateMatrixWorld(true);
+  }
+  syncProxy();
+  bandsObstacles();
+}
+function placeBandsRig() {
+  if (!bandsIn() || !comboBase.bands) return;
+  const B = comboBase.bands, P = state.comboPos.bands, g = bandsRig.group;
+  _qy.setFromAxisAngle(_Y, (P.rot || 0) * DEG);
+  g.quaternion.copy(_qy); g.scale.setScalar(BANDS_IN_SCENE);
+  g.position.set(P.x, 0, P.z).sub(new THREE.Vector3(B.c.x, 0, B.c.z).multiplyScalar(BANDS_IN_SCENE).applyQuaternion(_qy));
+  bandsRig.helpers.position.copy(g.position); bandsRig.helpers.quaternion.copy(g.quaternion); bandsRig.helpers.scale.copy(g.scale);
+}
+// the devices are solid in the bands' simulation. Carried over a device, the bands are lifted clear of it and fall
+// onto it (they drape over it)
+function bandsObstacles() {
+  if (!bandsIn() || !comboBase.bands) { if (bandsRig.world.obstacles.length) bandsRig.setObstacles([]); return; }
+  bandFrame();
+  const P = state.comboPos.bands, obs = members().filter((d) => d !== 'bands').flatMap(obbsOf).map(obbToBand), key = `${P.x.toFixed(2)},${P.z.toFixed(2)},${P.rot || 0}`;
+  if (key !== bandsPlaced) {
+    bandsPlaced = key;
+    const sup = topUnder(bandsRig.bounds(), obs), low = bandsRig.lowest();
+    if (Number.isFinite(low) && sup > low - 0.3) bandsRig.shift(0, sup + 0.6 - low, 0);
+  }
+  bandsRig.setObstacles(obs);
+}
+// the highest top of these boxes under a footprint (a grid across it), or the floor
+function topUnder(bb, obs) {
+  let top = 0, hi = 0;
+  for (const o of obs) hi = Math.max(hi, o.hi[1]);
+  for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) {
+    const x = bb.min.x + ((i + 0.5) / 9) * (bb.max.x - bb.min.x), z = bb.min.z + ((j + 0.5) / 9) * (bb.max.z - bb.min.z);
+    for (const o of obs) { if (x < o.lo[0] || x > o.hi[0] || z < o.lo[2] || z > o.hi[2]) continue; const y = rayY(o, x, hi + 1, z, -1); if (y != null && y > top) top = y; }
+  }
+  return top;
+}
+// a device's solid parts: one oriented box per sizeable visible part (its geometry's box, as the part is placed)
+const _c3 = new THREE.Vector3();
+function obbsOf(d) {
+  const out = [];
+  for (const g of GROUP_OF[d]()) {
+    if (!g.visible) continue;
+    g.traverseVisible((m) => {
+      if (!m.isMesh || /tube|hose|led|glow|shadow/i.test(m.name) || (!Array.isArray(m.material) && m.material?.transparent)) return;
+      const geo = m.geometry; if (!geo.boundingBox) geo.computeBoundingBox();
+      const bb = geo.boundingBox; if (bb.isEmpty()) return;
+      const e = m.matrixWorld.elements, sx = Math.hypot(e[0], e[1], e[2]), sy = Math.hypot(e[4], e[5], e[6]), sz = Math.hypot(e[8], e[9], e[10]);
+      const h = [Math.max(0.05, ((bb.max.x - bb.min.x) / 2) * sx), Math.max(0.05, ((bb.max.y - bb.min.y) / 2) * sy), Math.max(0.05, ((bb.max.z - bb.min.z) / 2) * sz)];
+      if (Math.max(...h) < 0.3) return;   // buttons, dots, little trims: inside a bigger part anyway
+      bb.getCenter(_c3).applyMatrix4(m.matrixWorld);
+      const ax = [e[0] / sx, e[1] / sx, e[2] / sx, e[4] / sy, e[5] / sy, e[6] / sy, e[8] / sz, e[9] / sz, e[10] / sz], lo = [], hi = [];
+      const c = [_c3.x, _c3.y, _c3.z];
+      for (let k = 0; k < 3; k++) { const r = Math.abs(ax[k]) * h[0] + Math.abs(ax[3 + k]) * h[1] + Math.abs(ax[6 + k]) * h[2]; lo.push(c[k] - r); hi.push(c[k] + r); }
+      out.push({ c, ax, h, lo, hi, d, v: h[0] * h[1] * h[2] });
+    });
+  }
+  return out;
+}
+// a vertical ray (from y0, going dy = -1 down or +1 up) at x, z against a box: the height it enters it at, or null
+function rayY(o, x, y0, z, dy) {
+  const A = o.ax, px = x - o.c[0], py = y0 - o.c[1], pz = z - o.c[2];
+  let t0 = -Infinity, t1 = Infinity;
+  for (let k = 0; k < 3; k++) {
+    const p = px * A[3 * k] + py * A[3 * k + 1] + pz * A[3 * k + 2], v = dy * A[3 * k + 1];
+    if (Math.abs(v) < 1e-9) { if (Math.abs(p) > o.h[k]) return null; continue; }
+    let a = (-o.h[k] - p) / v, b = (o.h[k] - p) / v; if (a > b) { const t = a; a = b; b = t; }
+    if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) return null;
+  }
+  return t1 < 0 ? null : y0 + dy * Math.max(0, t0);
+}
+const moveObbs = (L, dx, dy, dz) => { for (const o of L) { o.c[0] += dx; o.c[1] += dy; o.c[2] += dz; o.lo[0] += dx; o.lo[1] += dy; o.lo[2] += dz; o.hi[0] += dx; o.hi[1] += dy; o.hi[2] += dz; } };
+// how far up it must go to rest on what is under it: over a grid across its footprint, the top of what is below
+// against its own underside there. Also: where it touches (the grid points that carry it), to tell if it stands
+function restLift(mine, others) {
+  const res = { lift: 0, touch: [], base: [] };
+  if (!others.length || !mine.length) return res;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, top = -Infinity, bot = Infinity;
+  for (const o of mine) { x0 = Math.min(x0, o.lo[0]); x1 = Math.max(x1, o.hi[0]); z0 = Math.min(z0, o.lo[2]); z1 = Math.max(z1, o.hi[2]); bot = Math.min(bot, o.lo[1]); }
+  for (const o of others) top = Math.max(top, o.hi[1]);
+  const N = 9, pts = [];
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const x = x0 + ((i + 0.5) / N) * (x1 - x0), z = z0 + ((j + 0.5) / N) * (z1 - z0);
+    let under = Infinity;
+    for (const o of mine) { if (x < o.lo[0] || x > o.hi[0] || z < o.lo[2] || z > o.hi[2]) continue; const y = rayY(o, x, bot - 1, z, 1); if (y != null && y < under) under = y; }
+    if (under === Infinity) continue;
+    res.base.push([x, z, under]);
+    let sup = -Infinity, by = null;
+    for (const o of others) { if (x < o.lo[0] || x > o.hi[0] || z < o.lo[2] || z > o.hi[2]) continue; const y = rayY(o, x, top + 1, z, -1); if (y != null && y > sup) { sup = y; by = o.d; } }
+    if (sup > -Infinity) { pts.push([x, z, sup - under, by]); res.lift = Math.max(res.lift, sup - under); }
+  }
+  if (res.lift > 1e-4) res.touch = pts.filter((p) => p[2] > res.lift - 0.4);
+  const low = Math.min(...res.base.map((p) => p[2]));
+  res.base = res.base.filter((p) => p[2] < low + 0.5);   // its own underside: where it would stand on a flat floor
+  return res;
+}
+// does it stand where it touches? its centre of mass (its parts' centres, by their volume) over the patch that carries
+// it (the touching points' extent, a little wider: a grid point stands for the cell round it)
+function stands(mine, R, cellX, cellZ) {
+  const touch = R.touch;
+  let m = 0, cx = 0, cz = 0;
+  for (const o of mine) { m += o.v; cx += o.c[0] * o.v; cz += o.c[2] * o.v; }
+  cx /= m; cz /= m;
+  const ext = (P) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const p of P) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); } return { x0, x1, z0, z1, w: x1 - x0 + cellX, d: z1 - z0 + cellZ }; };
+  const T = ext(touch), B = ext(R.base);
+  // carried over most of its own base (or 3 cm each way at least): a device does not stay balanced on an edge
+  if (T.w < Math.min(0.6 * B.w, 3) || T.d < Math.min(0.6 * B.d, 3)) return false;
+  // and its centre of mass over what carries it (half a grid cell each way: a point stands for the cell round it)
+  return cx > T.x0 - cellX / 2 && cx < T.x1 + cellX / 2 && cz > T.z0 - cellZ / 2 && cz < T.z1 + cellZ / 2;
+}
+// its parts against the others', seen from above (each box's footprint, its axes as the separating axes): the
+// shortest sideways move that clears the deepest overlap among parts at the same height, or null
+function sidePush(mine, others) {
+  let best = null, depth = 0.02;
+  const corners = (o) => { const P = []; for (const a of [-1, 1]) for (const b of [-1, 1]) for (const c of [-1, 1]) P.push([o.c[0] + a * o.h[0] * o.ax[0] + b * o.h[1] * o.ax[3] + c * o.h[2] * o.ax[6], o.c[2] + a * o.h[0] * o.ax[2] + b * o.h[1] * o.ax[5] + c * o.h[2] * o.ax[8]]); return P; };
+  for (const a of mine) for (const b of others) {
+    if (a.lo[1] > b.hi[1] - 0.05 || b.lo[1] > a.hi[1] - 0.05) continue;
+    if (a.lo[0] > b.hi[0] || b.lo[0] > a.hi[0] || a.lo[2] > b.hi[2] || b.lo[2] > a.hi[2]) continue;
+    const A = corners(a), Bc = corners(b);
+    let minO = Infinity, axis = null;
+    for (const o of [a, b]) for (let k = 0; k < 3; k++) {
+      let nx = o.ax[3 * k], nz = o.ax[3 * k + 2]; const l = Math.hypot(nx, nz); if (l < 0.2) continue; nx /= l; nz /= l;
+      let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+      for (const p of A) { const v = p[0] * nx + p[1] * nz; if (v < a0) a0 = v; if (v > a1) a1 = v; }
+      for (const p of Bc) { const v = p[0] * nx + p[1] * nz; if (v < b0) b0 = v; if (v > b1) b1 = v; }
+      const ov = Math.min(a1 - b0, b1 - a0);
+      if (ov <= 0) { minO = 0; break; }
+      if (ov < minO) { minO = ov; axis = [nx, nz, a1 - b0 < b1 - a0 ? -1 : 1]; }
+    }
+    if (minO > depth && axis) { depth = minO; best = [axis[0] * axis[2] * (minO + 0.05), axis[1] * axis[2] * (minO + 0.05)]; }
+  }
+  return best;
+}
+// one device put down at its place, among those already down (all): dropped onto what is under it (tipping off what
+// cannot carry it), then slid clear of anything it still cuts into. Returns where it ends up: { dx, dz, lift } from
+// its place, and whether it is clear
+const copyObbs = (L) => L.map((o) => ({ ...o, c: [...o.c], lo: [...o.lo], hi: [...o.hi] }));
+function dropAt(mine, all, cellX, cellZ, dx, dz, slide, floorOnly = false) {
+  const m = copyObbs(mine); moveObbs(m, dx, 0, dz);
+  let lift = 0;
+  for (let it = 0; it < (slide ? 8 : 1); it++) {
+    const skip = new Set();
+    let R = restLift(m, all);
+    while (R.lift > 1e-4 && !stands(m, R, cellX, cellZ)) { for (const p of R.touch) skip.add(p[3]); R = restLift(m, all.filter((o) => !skip.has(o.d))); }
+    if (floorOnly) R.lift = 0;   // (the pouch stands on the floor: it never goes on top of a device)
+    if (R.lift > 1e-4) moveObbs(m, 0, R.lift, 0);
+    lift = R.lift;
+    const p = sidePush(m, all);
+    if (!p) return { dx, dz, lift, ok: true };
+    if (!slide) break;
+    moveObbs(m, p[0], -R.lift, p[1]); dx += p[0]; dz += p[1];
+  }
+  return { dx, dz, lift, ok: false };
+}
+// clear of everything, as near its place as can be: sliding first (it slides along what it was pushed into); wedged,
+// the nearest free spot round its place (searched outward)
+function freePlace(mine, all, floorOnly = false) {
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const o of mine) { x0 = Math.min(x0, o.lo[0]); x1 = Math.max(x1, o.hi[0]); z0 = Math.min(z0, o.lo[2]); z1 = Math.max(z1, o.hi[2]); }
+  const cellX = (x1 - x0) / 9, cellZ = (z1 - z0) / 9;
+  const slid = dropAt(mine, all, cellX, cellZ, 0, 0, true, floorOnly);
+  if (slid.ok) return slid;
+  for (let r = 1; r <= 120; r += 1.5) for (let k = 0; k < 24; k++) {
+    const a = (k / 24) * 2 * Math.PI, at = dropAt(mine, all, cellX, cellZ, r * Math.cos(a), r * Math.sin(a), false, floorOnly);
+    if (at.ok) return at;
+  }
+  return slid;
+}
+function settleCombo(ds, pouchSolid = true) {
+  const rank = (d) => { const i = state.comboStack.indexOf(d); return i < 0 ? -1 : i; };
+  const order = [...ds].sort((a, b) => rank(a) - rank(b) || COMBO_ORDER.indexOf(a) - COMBO_ORDER.indexOf(b)), done = [];
+  for (const d of order) {
+    const parts = GROUP_OF[d](), mine = obbsOf(d), all = [...(pouchSolid ? bandsSolid() : []), ...done.flat()];
+    const f = freePlace(mine, all);
+    for (const o of parts) { o.position.x += f.dx; o.position.y += f.lift; o.position.z += f.dz; }
+    moveObbs(mine, f.dx, f.lift, f.dz);
+    state.comboPos[d].x += f.dx; state.comboPos[d].z += f.dz;
+    done.push(mine);
+  }
+}
+// the floor shadow's stand-ins follow the moved devices (no re-cloning while dragging)
+function syncProxy() {
+  if (!proxy) return;
+  model.children.forEach((c, i) => { const p = proxy.children[i]; if (p) { p.position.copy(c.position); p.quaternion.copy(c.quaternion); p.scale.copy(c.scale); p.visible = c.visible; } });
+}
+
+function applyPose() {
+  const on = new Set(members());
+  restoreHome();   // where a combined shot may have moved them
+  tablet.visible = on.has('pad');
+  phone.visible = on.has('iphone');
+  box.visible = on.has('box');
+  mband.visible = on.has('mband');
+  block.visible = on.has('block');
+  bloom.visible = on.has('bloom');
+  scale.visible = on.has('scale');
+  bp.visible = on.has('bp');
+  gluco.visible = on.has('gluco');
+  bandsRig.group.visible = on.has('bands'); applyBandAids();
+  stand.visible = on.has('pad') && state.stand;
   const mbFlat = isMBand() && state.mbandPose !== 'worn';
   setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : isScale() ? 22 : isBP() ? 12 : isGluco() ? 6 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : isScale() ? 150 : isBP() ? 90 : isGluco() ? 60 : 140);
-  if (isBands()) {
+  if (comboOn()) {
+    // each device in its own pose, then set side by side
+    for (const d of members()) POSER[d]();
+    syncPhoenix(); snapshotCombo(); placeCombo(); syncPhoenix();
+  } else if (isBands()) {
     // the bands pose themselves (the simulation); a new preset is built by setupBands()
   } else if (isMBand()) {
     poseMBandStudio();
@@ -302,16 +632,14 @@ function applyPose() {
   } else if (isPhone()) {
     posePhone();
     syncPhoenix();
-  } else if (state.stand) {
-    tablet.position.set(0, DIM.stand.slotFloor + H / 2, -T / 2);
-  } else if (state.pose === 'upright') {
-    tablet.position.set(0, H / 2 + 0.001, -T / 2);
   } else {
-    // lying on its back, screen up, top edge away from the viewer
-    tablet.rotation.x = -Math.PI / 2;
-    tablet.position.set(0, 0.001, 0);
+    posePad();
   }
   model.updateMatrixWorld(true);
+  if (comboOn()) {   // the floor's shadow frame wide enough for them all
+    const sz = modelBounds().getSize(new THREE.Vector3()), half = Math.max(sz.x, sz.z) / 2 * 1.2 + 4;
+    setShadowFrame(half, half * 6.5);
+  }
   setFloor(true);
   rebuildShadowProxy();
   resetShadow();
@@ -344,19 +672,25 @@ function setFloor(fromPose) {
   topCam.position.set(0, y + 200, 0); topCam.lookAt(0, y, 0);
 }
 
-function modelBounds() {
-  if (isPhone()) { const b = new THREE.Box3().setFromObject(phone); if (phx.group.visible) b.expandByObject(phx.group); return b; }
-  if (isBox()) return new THREE.Box3().setFromObject(box);
-  if (isMBand()) return new THREE.Box3().setFromObject(mband);
-  if (isBlock()) return new THREE.Box3().setFromObject(block);
-  if (isBloom()) return new THREE.Box3().setFromObject(bloom);
-  if (isScale()) return new THREE.Box3().setFromObject(scale);
-  if (isBP()) return visibleBox(bp);
-  if (isGluco()) return visibleBox(gluco);
-  if (isBands()) { const b = bandsRig.bounds(); return b.isEmpty() ? new THREE.Box3(new THREE.Vector3(-10, 0, -10), new THREE.Vector3(10, 20, 10)) : b; }
+function boundsOfDevice(d) {
+  if (d === 'iphone') { const b = new THREE.Box3().setFromObject(phone); if (phx.group.visible) b.expandByObject(phx.group); return b; }
+  if (d === 'box') return new THREE.Box3().setFromObject(box);
+  if (d === 'mband') return new THREE.Box3().setFromObject(mband);
+  if (d === 'block') return new THREE.Box3().setFromObject(block);
+  if (d === 'bloom') return new THREE.Box3().setFromObject(bloom);
+  if (d === 'scale') return new THREE.Box3().setFromObject(scale);
+  if (d === 'bp') return visibleBox(bp);
+  if (d === 'gluco') return visibleBox(gluco);
+  if (d === 'bands') { const b = bandsRig.bounds(); if (b.isEmpty()) return new THREE.Box3(new THREE.Vector3(-10, 0, -10), new THREE.Vector3(10, 20, 10)); bandsRig.group.updateMatrixWorld(true); return b.clone().applyMatrix4(bandsRig.group.matrixWorld); }
   const bb = new THREE.Box3().setFromObject(tablet);
   if (state.stand) bb.expandByObject(stand);
   return bb;
+}
+// all that is in the shot
+function modelBounds() {
+  const b = new THREE.Box3();
+  for (const d of members()) b.union(boundsOfDevice(d));
+  return b;
 }
 
 // ---------------------------------------------------------------- screen content
@@ -402,10 +736,10 @@ function loadImage(src) {
 
 // ---------------------------------------------------------------- studio environment
 const pmrem = new THREE.PMREMGenerator(renderer);
-// the studio environment as reflections. The scale's glass is near a mirror: at the generator's own 256 px the
-// overhead light's edge showed in it as steps, so for the scale it is first rendered into a 1024 px cube
+// the studio environment as reflections. The screens and glass are near mirrors (clearcoat roughness 0.025): at the
+// generator's own 256 px the softboxes' edges showed in them blurred and stepped, so for every device the studio is
+// first rendered into a 1024 px cube (the PMREM keeps that size for its sharpest level)
 function envFrom(env) {
-  if (!isScale() && !isBP() && !isGluco()) return pmrem.fromScene(env, 0.0, 1, 1000);   // the BP monitor's glossy black face too
   const rt = new THREE.WebGLCubeRenderTarget(1024, { type: THREE.HalfFloatType });
   new THREE.CubeCamera(1, 1000, rt).update(renderer, env);
   const out = pmrem.fromCubemap(rt.texture); rt.dispose();
@@ -465,7 +799,7 @@ function buildEnvironment() {
   const env = new THREE.Scene();
   // cyclorama: soft grey walls, darker ceiling, bright floor bounce
   const [rTop, rHor, rFloor] = lighting().room.map((v) => v.toFixed(3));
-  const room = new THREE.Mesh(new THREE.SphereGeometry(400, 48, 24), new THREE.ShaderMaterial({
+  const room = new THREE.Mesh(new THREE.SphereGeometry(400, 128, 64), new THREE.ShaderMaterial({
     side: THREE.BackSide,
     vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: `varying vec3 vD; void main(){ float y = vD.y;
@@ -482,15 +816,15 @@ function buildEnvironment() {
     env.add(m);
   };
   // key softbox in the light direction
-  add(110, 110, 7.0 * k, state.lightAz, state.lightEl, 150, 0.06);
+  add(110, 110, 7.0 * k, state.lightAz, state.lightEl, 150, 0.03);   // a crisp edge: glass and screens mirror it
   // large overhead scrim (a device's lighting can turn it down: the box's has none)
   add(260, 260, 1.6 * (lighting().scrim ?? 1), state.lightAz, 88, 190, 0.2);
   // fill from the opposite side, low and broad (the box's comes from the front left, as in its mockup)
   add(220, 150, 0.9 * (lighting().fill ?? 1), state.lightAz + (lighting().fillAz ?? 180), 18, 200, 0.25);
   // two strip lights for edge definition
   // (a device's lighting can turn either down: the block's renders have no light on the far side of the key)
-  add(26, 220, 3.4 * k * (lighting().strips?.[0] ?? 1), state.lightAz + 115, 15, 170, 0.08);
-  add(26, 220, 2.6 * k * (lighting().strips?.[1] ?? 1), state.lightAz - 125, 15, 170, 0.08);
+  add(26, 220, 3.4 * k * (lighting().strips?.[0] ?? 1), state.lightAz + 115, 15, 170, 0.05);
+  add(26, 220, 2.6 * k * (lighting().strips?.[1] ?? 1), state.lightAz - 125, 15, 170, 0.05);
   if (envRT) envRT.dispose();
   envRT = envFrom(env);
   scene.environment = envRT.texture;
@@ -636,7 +970,7 @@ let accCount = 0;
 
 function resetShadow() {
   accCount = 0; ambI = 0; keyI = 0; liveDirty = true;
-  groundMat.uniforms.uMix.value = isBands() ? 0 : 1;
+  groundMat.uniforms.uMix.value = bandsIn() ? 0 : 1;
   const prev = renderer.getRenderTarget();
   renderer.setRenderTarget(accTarget);
   renderer.setClearColor(0x000000, 0);
@@ -719,7 +1053,7 @@ function accumulate(n) {
   renderer.autoClear = prevAuto;
   renderer.toneMapping = prevTone;
   groundMat.uniforms.uCount.value = accCount;
-  groundMat.uniforms.uMix.value = isBands() ? THREE.MathUtils.smoothstep(accCount / SHADOW_SAMPLES, 0.15, 1) : 1;
+  groundMat.uniforms.uMix.value = bandsIn() ? THREE.MathUtils.smoothstep(accCount / SHADOW_SAMPLES, 0.15, 1) : 1;
   return true;
 }
 
@@ -751,15 +1085,18 @@ function renderMain() {
   renderer.render(scene, camera);
 }
 
+let padCheck = 0;
 function loop() {
   requestAnimationFrame(loop);
+  // the lighting pad's device icon follows the model (a device loading late, the bands settling): checked twice a second
+  if (++padCheck % 30 === 0 && padIconKey !== padIconKeyNow()) drawLightPad();
   const moved = controls.update();
   if (moved) { syncCameraUI(); dirty = true; }
-  const moving = isBands() && bandsRig.step();
+  const moving = bandsIn() && bandsRig.step();
   if (moving) { markShadowDirty(); resetShadow(); }
   if (state.shadow) {
     // the bands: their live shadow while they move, the full one once they rest
-    if (isBands() && liveDirty) { liveShadow(); dirty = true; }
+    if (bandsIn() && liveDirty) { liveShadow(); dirty = true; }
     if (!moving && accumulate(IS_TOUCH ? 16 : 24)) dirty = true;
   }
   if (dirty) { renderMain(); dirty = false; }
@@ -943,8 +1280,9 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
     // the box and the bands keep their own light and floor shadow (their look depends on them); the others share theirs
     // (the yoga block too)
     const own = (d) => d === 'box' || d === 'bands' || d === 'block';
-    if (own(state.device) && state.device !== v) { if (state.device === 'box') boxLook = grabLook(); else if (state.device === 'bands') bandsLook = grabLook(); else blockLook = grabLook(); if (!own(v)) applyLook(otherLook); }
-    if (own(v) && state.device !== v) { if (!own(state.device)) otherLook = grabLook(); applyLook(v === 'box' ? boxLook : v === 'bands' ? bandsLook : blockLook); }
+    if (!comboOn() && own(state.device) && state.device !== v) { if (state.device === 'box') boxLook = grabLook(); else if (state.device === 'bands') bandsLook = grabLook(); else blockLook = grabLook(); if (!own(v)) applyLook(otherLook); }
+    if (!comboOn() && own(v) && state.device !== v) { if (!own(state.device)) otherLook = grabLook(); applyLook(v === 'box' ? boxLook : v === 'bands' ? bandsLook : blockLook); }
+    if (state.comboOn && state.device !== v && !state.combo.includes(state.device)) state.combo.push(state.device);   // combined: the last one stays in the shot
     state.device = v;
     // the M-Band's renders are lit from the upper left, the light catching the tops of the yarn and the pod's edges
     if (v === 'mband' && !mbandLit) { mbandLit = true; state.lightAz = -35; state.lightEl = 38; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
@@ -954,10 +1292,10 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
     if (v === 'gluco' && !glLit) { glLit = true; state.lightAz = -30; state.lightEl = 55; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'bp' && !bpLit) { bpLit = true; state.lightAz = -30; state.lightEl = 55; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'scale' && !scaleLit) { scaleLit = true; state.lightAz = -35; state.lightEl = 58; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
-    if (v === 'bands' && !bandsRig.meshes.length) setupBands(false);
+    if (v === 'bands' && !bandsRig.meshes.length) bandsRig.setup();
     syncSetupUI(); applyPose(); updateLights(); drawLightPad();
-    if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else if (v === 'gluco') frameGluco(); else frame(32, 14);
-    renderPicker();
+    if (comboOn()) { if (!pickedInView) frame(); } else if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else if (v === 'gluco') frameGluco(); else frame(32, 14);
+    renderPicker(); renderCombo();
     if (screenPreset === 'exercise') setScreenPreset('exercise'); else updateScreen();
   }
   if (name === 'boxpose') { state.boxPose = v; applyPose(); updateLights(); frameBox(); }
@@ -998,6 +1336,33 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
   if (name === 'aspect') { state.aspect = v; limitResolutions(); resize(); }
 }));
 
+// Combine: the devices to show with the one being edited
+function renderCombo() {
+  $('#combo-controls').classList.toggle('disabled', !state.comboOn);
+  $('#combo-chips').innerHTML = COMBO_ORDER.map((d) => `<button data-combo="${d}" class="${d === state.device || state.combo.includes(d) ? 'on' : ''}"${d === state.device ? ' disabled title="The device being edited"' : ''}>${COMBO_NAMES[d]}</button>`).join('');
+  const P = state.comboPos[state.device];
+  turnRange.el.value = P?.rot ?? 0; turnRange.show();
+  $('#combo-turn').closest('.slider').classList.toggle('disabled', !comboOn());
+}
+function comboChanged() {
+  if (bandsIn() && !bandsRig.meshes.length) bandsRig.setup();
+  syncSetupUI(); applyPose(); updateLights(); frame(); drawLightPad(); renderCombo(); requestRender();
+}
+$('#combo-on').addEventListener('change', (e) => { state.comboOn = e.target.checked; comboChanged(); });
+$('#combo-chips').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-combo]'); if (!b || b.disabled) return;
+  const d = b.dataset.combo, i = state.combo.indexOf(d);
+  if (i >= 0) state.combo.splice(i, 1); else state.combo.push(d);
+  if (state.combo.length && !state.comboOn) { state.comboOn = true; $('#combo-on').checked = true; }
+  comboChanged();
+});
+// a placement change: only the placements are worked out again; the floor shadow restarts
+function comboMoved() { placeCombo(); syncPhoenix(); markShadowDirty(); resetShadow(); requestRender(); }
+const turnRange = bindRange('combo-turn', null, deg, (v) => { const P = state.comboPos[state.device]; if (!comboOn() || !P) return; P.rot = v; comboMoved(); });
+bindRange('combo-gap', 'comboGap', (v) => `${v} cm`, () => { if (comboOn()) { arrangeRow(); comboMoved(); } });
+$('#combo-arrange').addEventListener('click', () => { if (!comboOn()) return; arrangeRow(); comboMoved(); setFloor(false); updateLights(); frame(); drawLightPad(); renderCombo(); });
+renderCombo();
+
 // the glucometer's custom reading: its fields shown on the LCD as you type
 function glFromFields() {
   const v = (k, re, max) => ($('#gl-' + k).value || '').replace(re, '').slice(0, max);
@@ -1036,7 +1401,7 @@ function syncSetupUI() {
   $('#bp-cuff-row').classList.toggle('hidden', !isBP());
   $('#bp-reading-row').classList.toggle('hidden', !isBP());
   $('#bp-custom-row').classList.toggle('hidden', !isBP() || state.bpReading !== 'custom');
-  $('#box-pose-row').classList.toggle('hidden', !isBox());
+  $('#box-pose-row').classList.toggle('hidden', !isBox() || comboOn());   // combined, the box rests (as everything there)
   $('#bands-rows').classList.toggle('hidden', !isBands());
   const floatingBands = bandsRig.opts.pos === 'floating', inPouch = bandsRig.opts.pouch;
   $('#band-pos-row').classList.toggle('hidden', inPouch);
@@ -1097,6 +1462,68 @@ bindRange('env', 'envIntensity', pct, (v) => { scene.environmentIntensity = v; r
 bindRange('exposure', 'exposure', (v) => v.toFixed(2), (v) => { renderer.toneMappingExposure = v; requestRender(); });
 
 // light pad (top-down: front of the tablet is at the bottom)
+// The device's icon in the pad: the model drawn from straight above (front at the bottom, +x to the right, as the
+// pad maps the light), flat-shaded grey, fitted to PAD_ICON_PX across. Redrawn only when the device, its pose or its
+// size on the floor changes.
+const PAD_ICON_PX = 50, PAD_ICON_RES = 192;
+const padIconRT = new THREE.WebGLRenderTarget(PAD_ICON_RES, PAD_ICON_RES, { samples: 4 });
+const padIconCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+const padIconMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  vertexShader: 'varying vec3 vN; void main(){ vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position,1.0); }',
+  // faces turned up are light, faces sloping away darker, so folds and the cuff's roll read in the icon
+  fragmentShader: 'varying vec3 vN; void main(){ float u = abs(normalize(vN).y); gl_FragColor = vec4(vec3(mix(0.56, 0.80, u)), 1.0); }',
+});
+let padIconCache = null, padIconKey = '';
+function padIconKeyNow(b = modelBounds()) {
+  const r = (v) => v.toArray().map((x) => x.toFixed(1)).join(',');
+  return `${state.device}|${r(b.min)}|${r(b.max)}`;
+}
+function padIcon() {
+  const b = modelBounds();
+  if (b.isEmpty()) return null;
+  const key = padIconKeyNow(b);
+  if (key === padIconKey && padIconCache) return padIconCache;
+  const ctr = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
+  const half = Math.max(sz.x, sz.z) / 2 * 1.06 + 0.05;
+  padIconCam.left = -half; padIconCam.right = half; padIconCam.top = half; padIconCam.bottom = -half;
+  padIconCam.position.set(ctr.x, b.max.y + 20, ctr.z);
+  padIconCam.up.set(0, 0, -1);   // back at the top of the image, front at the bottom
+  padIconCam.lookAt(ctr.x, b.min.y, ctr.z);
+  padIconCam.far = sz.y + 60; padIconCam.updateProjectionMatrix();
+  // only the device: hide the floor, the bands' handles, the lights' helpers
+  const hidden = [];
+  for (const o of scene.children) if (o !== model && o !== phx.group && o.visible) { o.visible = false; hidden.push(o); }
+  const prev = { rt: renderer.getRenderTarget(), bg: scene.background, ov: scene.overrideMaterial, au: renderer.shadowMap.autoUpdate,
+    nu: renderer.shadowMap.needsUpdate, cc: renderer.getClearColor(new THREE.Color()), ca: renderer.getClearAlpha() };
+  renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = false;
+  scene.background = null; scene.overrideMaterial = padIconMat;
+  renderer.setRenderTarget(padIconRT); renderer.setClearColor(0x000000, 0); renderer.clear();
+  renderer.render(scene, padIconCam);
+  const px = new Uint8Array(PAD_ICON_RES * PAD_ICON_RES * 4);
+  renderer.readRenderTargetPixels(padIconRT, 0, 0, PAD_ICON_RES, PAD_ICON_RES, px);
+  renderer.setRenderTarget(prev.rt); renderer.setClearColor(prev.cc, prev.ca);
+  scene.background = prev.bg; scene.overrideMaterial = prev.ov;
+  renderer.shadowMap.autoUpdate = prev.au; renderer.shadowMap.needsUpdate = prev.nu;
+  for (const o of hidden) o.visible = true;
+  // rows come bottom-up; the grey value becomes the icon's tone, the alpha its outline
+  const N = PAD_ICON_RES, shade = document.createElement('canvas'), dark = document.createElement('canvas');
+  shade.width = dark.width = shade.height = dark.height = N;
+  const sd = new ImageData(N, N), dd = new ImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = ((N - 1 - y) * N + x) * 4, o = (y * N + x) * 4, a = px[i + 3];
+    if (!a) continue;
+    const g = Math.round(px[i] * 255 / a);   // un-premultiply the antialiased rim
+    const t = 150 + (g - 143) * 0.9;           // 0.56..0.80 grey -> about #969696..#cbcbcb
+    sd.data[o] = sd.data[o + 1] = sd.data[o + 2] = Math.max(0, Math.min(255, Math.round(t))); sd.data[o + 3] = a;
+    dd.data[o] = dd.data[o + 1] = dd.data[o + 2] = 46; dd.data[o + 3] = a;
+  }
+  shade.getContext('2d').putImageData(sd, 0, 0); dark.getContext('2d').putImageData(dd, 0, 0);
+  // the icon is fitted by its longest side on the floor; its offset keeps an off-centre device where it stands
+  padIconCache = { shade, dark, w: N, h: N, size: N * Math.max(sz.x, sz.z) / (2 * half), ox: 0, oy: 0 };
+  padIconKey = key;
+  return padIconCache;
+}
 const pad = $('#lightpad'), pctx = pad.getContext('2d');
 function drawLightPad() {
   const dpr = window.devicePixelRatio || 1;
@@ -1108,15 +1535,14 @@ function drawLightPad() {
   pctx.strokeStyle = '#dbdbdb'; pctx.lineWidth = 1;
   for (const f of [1, 2 / 3, 1 / 3]) { pctx.beginPath(); pctx.arc(c, c, R * f, 0, Math.PI * 2); pctx.stroke(); }
   pctx.beginPath(); pctx.moveTo(c - R, c); pctx.lineTo(c + R, c); pctx.moveTo(c, c - R); pctx.lineTo(c, c + R); pctx.stroke();
-  // device icon, screen facing the bottom
-  const hw = isPhone() ? 7 : 22;
-  if (isBox()) { pctx.fillStyle = '#c2c2c2'; pctx.beginPath(); pctx.roundRect(c - 9, c - 9, 18, 18, 2); pctx.fill(); }
-  else if (isBands()) { pctx.strokeStyle = '#c2c2c2'; pctx.lineWidth = 3; for (const dx of [-9, 0, 9]) { pctx.beginPath(); pctx.ellipse(c + dx, c, 3, 9, 0, 0, Math.PI * 2); pctx.stroke(); } }
-  else {
-    pctx.fillStyle = '#c2c2c2'; pctx.beginPath(); pctx.roundRect(c - hw, c - 3, hw * 2, 6, 1.5); pctx.fill();
-    pctx.fillStyle = '#2e2e2e'; pctx.fillRect(c - hw + 2, c + 1.5, hw * 2 - 4, 1.5);
+  // the device seen from above, as it stands now (its shape and pose), front at the bottom: a flat grey
+  // silhouette with a dark edge on the side that faces the front
+  const icon = padIcon();
+  if (icon) {
+    const k = PAD_ICON_PX / icon.size, w = icon.w * k, h = icon.h * k;
+    pctx.drawImage(icon.dark, c - w / 2 + icon.ox * k, c - h / 2 + icon.oy * k + 1.6, w, h);
+    pctx.drawImage(icon.shade, c - w / 2 + icon.ox * k, c - h / 2 + icon.oy * k, w, h);
   }
-  if (isPad()) { pctx.fillStyle = '#ff7e7e'; pctx.fillRect(c + 9, c - 3, 8, 6); }
   pctx.fillStyle = '#5e5e5e'; pctx.font = '500 9.5px Figtree, -apple-system, sans-serif'; pctx.textAlign = 'center';
   pctx.fillText('Front', c, S - 2); pctx.fillText('Back', c, 10);
   // light
@@ -1379,7 +1805,7 @@ viewport.addEventListener('drop', (e) => { e.preventDefault(); viewport.classLis
 bindRange('screen-bright', 'screenBrightness', pct, (v) => { if (screenSource) M.screen.emissiveIntensity = P.screen.emissiveIntensity = v; requestRender(); });
 bindRange('screen-reflect', 'screenReflect', pct, (v) => applyReflect(v));
 function applyReflect(v) {
-  for (const m of [M.screen, P.screen, M.glass]) { m.clearcoat = v; m.specularIntensity = 0.15 + 0.6 * v; }
+  for (const m of [M.screen, P.screen, M.glass]) { m.clearcoat = v; m.specularIntensity = 0.05 + 0.25 * v; }   // the coat is the sharp reflection; the rougher base under it only a faint haze
   requestRender();
 }
 
@@ -1416,10 +1842,11 @@ document.querySelectorAll('[data-bg]').forEach((b) => b.addEventListener('click'
 function setupBands(reframe) {
   bandsRig.opts.showHooks = bandHooksWanted && bandHooksAllowed();
   bandsRig.setup();
-  bandsRig.aimPrints(bandsPresetCamera());   // once, before the first frame: the prints stay where they are put
+  if (comboOn() && bandsIn()) { snapshotBands(); bandsPlaced = ''; placeCombo(); }   // combined: built where they stand in the shot
+  { const cam = bandsPresetCamera(); toBandLocal(cam.position); cam.quaternion.premultiply(_qInvBand); cam.updateMatrixWorld(); bandsRig.aimPrints(cam); }   // once, before the first frame: the prints stay where they are put
   rebuildShadowProxy(); resetShadow(); markShadowDirty();
   syncSetupUI(); setFloor(true); updateLights(); drawLightPad(); applyBandAids();
-  if (reframe) setTimeout(frameBands, 900);   // once the shape has mostly formed
+  if (reframe && !comboOn()) setTimeout(frameBands, 900);   // once the shape has mostly formed
   requestRender();
 }
 // each preset's view: standing, from the front right and a little above, so each band behind shows past the one in
@@ -1461,11 +1888,12 @@ stage.addEventListener('pointerdown', (e) => {
   const hit = bandsRig.pick(rayAt(e));
   if (!hit) return;
   e.stopPropagation(); e.preventDefault();
+  const wp = hit.point.clone(); hit.point = toBandLocal(hit.point.clone());   // the simulation's own frame
   const D = bandsRig.startDrag(hit, e.altKey ? 'move' : 'pull');
   // floating: drag across the view; on a surface: along the floor's plane at the grabbed height
   const view = camera.getWorldDirection(new THREE.Vector3());
-  if (bandsRig.opts.pos === 'surface' && !hit.pin) dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), hit.point);
-  else dragPlane.setFromNormalAndCoplanarPoint(view.negate(), hit.point);
+  if (bandsRig.opts.pos === 'surface' && !hit.pin) dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), wp);
+  else dragPlane.setFromNormalAndCoplanarPoint(view.negate(), wp);
   bandDrag = { id: e.pointerId, D };
   try { stage.setPointerCapture(e.pointerId); } catch { /* a pointer that is already gone */ }
   stage.style.cursor = 'grabbing';
@@ -1473,7 +1901,7 @@ stage.addEventListener('pointerdown', (e) => {
 stage.addEventListener('pointermove', (e) => {
   if (!isBands()) return;
   if (bandDrag && e.pointerId === bandDrag.id) {
-    if (rayAt(e).ray.intersectPlane(dragPlane, hitP)) bandsRig.dragTo(hitP);
+    if (rayAt(e).ray.intersectPlane(dragPlane, hitP)) bandsRig.dragTo(toBandLocal(hitP.clone()));
     e.stopPropagation(); return;
   }
   if (e.buttons) return;
@@ -1494,13 +1922,70 @@ stage.addEventListener('wheel', (e) => {
   const target = bandDrag?.D?.clip ? { clip: bandDrag.D.clip } : bandDrag?.D?.pin || hoverPin;
   if (!target) return;
   e.stopPropagation(); e.preventDefault();
-  bandsRig.turn(target, (e.deltaY > 0 ? 1 : -1) * 6 * DEG, camera.getWorldDirection(new THREE.Vector3()), e.shiftKey);
+  bandsRig.turn(target, (e.deltaY > 0 ? 1 : -1) * 6 * DEG, toBandLocalDir(camera.getWorldDirection(new THREE.Vector3())), e.shiftKey);
 }, { capture: true, passive: false });
 stage.addEventListener('dblclick', (e) => {
   if (!isBands()) return;
   const hit = bandsRig.pick(rayAt(e));
   if (hit?.pin) { bandsRig.removePin(hit.pin); e.stopPropagation(); }
 }, { capture: true });
+
+// combined shot: drag a device across the floor (at the height it was grabbed), scroll while dragging to turn it;
+// clicking one makes it the one being edited. Each move only re-places the devices, once a frame at most
+let objDrag = null, pickedInView = false, dragRaf = 0;
+function pickMember(r) {
+  const groups = [];
+  for (const d of members()) {
+    if (d === 'bands') { if (!isBands()) groups.push([d, bandsRig.group]); continue; }
+    for (const g of GROUP_OF[d]()) if (g.visible) groups.push([d, g]);
+  }
+  const hits = r.intersectObjects(groups.map((g) => g[1]), true);
+  for (const h of hits) {
+    for (let o = h.object; o; o = o.parent) { const f = groups.find((g) => g[1] === o); if (f) return { d: f[0], point: h.point }; }
+  }
+  return null;
+}
+stage.addEventListener('pointerdown', (e) => {
+  if (!comboOn() || e.button !== 0 || bandDrag) return;
+  const hit = pickMember(rayAt(e));
+  if (!hit) return;
+  e.stopPropagation(); e.preventDefault();
+  if (hit.d !== state.device) {   // edit the one clicked (without moving the camera)
+    pickedInView = true;
+    document.querySelector(`[data-seg="device"] button[data-value="${hit.d}"]`)?.click();
+    pickedInView = false;
+  }
+  const P = state.comboPos[hit.d]; if (!P) return;
+  dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), hit.point);
+  objDrag = { id: e.pointerId, d: hit.d, start: hit.point.clone(), x0: P.x, z0: P.z, moved: false };
+  state.comboStack = state.comboStack.filter((k) => k !== hit.d).concat(hit.d);   // put down last: it lands on top
+  try { stage.setPointerCapture(e.pointerId); } catch { /* gone */ }
+  stage.style.cursor = 'grabbing';
+}, { capture: true });
+stage.addEventListener('pointermove', (e) => {
+  if (!objDrag || e.pointerId !== objDrag.id) return;
+  e.stopPropagation();
+  if (!rayAt(e).ray.intersectPlane(dragPlane, hitP)) return;
+  const P = state.comboPos[objDrag.d];
+  P.x = objDrag.x0 + hitP.x - objDrag.start.x; P.z = objDrag.z0 + hitP.z - objDrag.start.z; objDrag.moved = true;
+  if (!dragRaf) dragRaf = requestAnimationFrame(() => { dragRaf = 0; comboMoved(); });
+}, { capture: true });
+const endObjDrag = (e) => {
+  if (!objDrag || e.pointerId !== objDrag.id) return;
+  e.stopPropagation();
+  const moved = objDrag.moved; objDrag = null; stage.style.cursor = '';
+  if (moved) { comboMoved(); setFloor(false); updateLights(); drawLightPad(); }
+};
+stage.addEventListener('pointerup', endObjDrag, { capture: true });
+stage.addEventListener('pointercancel', endObjDrag, { capture: true });
+stage.addEventListener('wheel', (e) => {
+  if (!objDrag) return;
+  e.stopPropagation(); e.preventDefault();
+  const P = state.comboPos[objDrag.d];
+  P.rot = (((P.rot || 0) + (e.deltaY > 0 ? 7.5 : -7.5) + 540) % 360) - 180; objDrag.moved = true;
+  turnRange.el.value = P.rot; turnRange.show();
+  if (!dragRaf) dragRaf = requestAnimationFrame(() => { dragRaf = 0; comboMoved(); });
+}, { capture: true, passive: false });
 
 // ---------------------------------------------------------------- export
 function exportSize() {
@@ -1582,7 +2067,7 @@ async function exportImage() {
     const type = state.format === 'png' ? 'image/png' : 'image/jpeg';
     const blob = await new Promise((r) => out.toBlob(r, type, 0.95));
     const { az, el } = getCamAngles();
-    const subject = isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}` : isBloom() ? `sword-bloom-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-m-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `thrive-pad_${state.stand ? 'stand' : state.pose}`;
+    const subject = comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}` : isBloom() ? `sword-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-m-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `thrive-pad_${state.stand ? 'stand' : state.pose}`;
     const name = `${subject}_az${Math.round(az)}_el${Math.round(el)}_${W}x${H}.${state.format}`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -1599,7 +2084,7 @@ async function exportImage() {
   }
 }
 $('#download').addEventListener('click', exportImage);
-if (new URLSearchParams(location.search).has('debug')) window.__studio = { renderToCanvas, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
+if (new URLSearchParams(location.search).has('debug')) window.__studio = { renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
 
 // ---------------------------------------------------------------- init
 if (IS_TOUCH) $('.hint').textContent = 'Drag to rotate · Pinch to zoom · Two-finger drag to pan';

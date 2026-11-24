@@ -162,7 +162,7 @@ export function createScaleMaterials(maxAniso = 8) {
   const img = new Image();
   img.onload = () => { printTex.image = printCanvas(img); printTex.needsUpdate = true; SM.onChange?.(); };
   img.src = new URL('./assets/yoga-block-logo.png', import.meta.url).href;
-  SM.top = new THREE.MeshPhysicalMaterial({ map: printTex, roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.075, specularIntensity: 0.5, ior: 1.52 });   // the coat a touch soft: a mirror one showed the studio dome's facets as steps
+  SM.top = new THREE.MeshPhysicalMaterial({ map: printTex, roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.035, specularIntensity: 0.2, ior: 1.52 });   // the coat near a mirror: the studio is now a 1024 px cube of a smooth dome, so no facets or steps show in it
   // the reading: light from under the glass, inside the display window (its canvas drawn on black)
   const D = SCALE.display, W = SCALE.W;
   const rect = new THREE.Vector4(D.x0 / W + 0.5, 1 - (D.z1 / W + 0.5), (D.x1 - D.x0) / W, (D.z1 - D.z0) / W);

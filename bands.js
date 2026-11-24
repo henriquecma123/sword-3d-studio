@@ -26,6 +26,7 @@ const REST_ASPECT = 0.3;                                 // the relaxed oval: sh
 const HOOK_R = 0.9;                                      // hook radius, cm: a studio dowel (the band wraps it smoothly)
 const MU_FLOOR = 0.9, MU_HOOK = 0.6, MU_BAND = 0.5;      // latex grips
 const MU_CLOTH = 0.35;                                    // latex on polyester twill
+const MU_OBJ = 0.7;                                      // latex on the other devices' plastic and glass
 const SUB = 3;                                           // render stations per segment
 // the segments' turning inertia, x10: with their true (tiny) inertia the bending and shear constraints pump energy
 // into the rotations; heavier rotations are stable and change only how fast a twist swings, not the shapes
@@ -200,6 +201,7 @@ export class BandWorld {
   constructor() {
     this.bands = []; this.hooks = []; this.clips = [];
     this.pouch = null;   // offline: when set, the pouch's walls hold the bands (pouchContacts)
+    this.obstacles = [];   // the other devices in a combined shot: solid boxes (see obstacleContacts)
     this.gravity = 1; this.floorY = 0; this.substeps = 16; this.calm = 0; this.awake = true;
     this.damping = 2.2;   // per second: air and the latex's own losses (a hung band swings for a couple of seconds)
     this.pairs = []; this._f = new Float64Array(9); this._g = new Float64Array(9);
@@ -591,6 +593,7 @@ export class BandWorld {
       // six cost a third of the simulation's time
       const hooks = this.hooksNear(b);
       this.floorContacts(b);
+      if (this.obstacles.length) this.obstacleContacts(b);
       if (this.pouch) this.pouchContacts(b);
       if (hooks.length) { this.hookContacts(b, hooks); this.hookChords(b, hooks); }
     }
@@ -623,6 +626,43 @@ export class BandWorld {
       // how hard the floor pushed this substep, summed over every pass (its friction, floorGrip, is in proportion;
       // counting only the last pass, after the first had taken most of the weight, left bands in a pile sliding)
       if (floorPush > 0) { const c = (s + 1) % b.n; b.fc[s] += 0.5 * floorPush; b.fc[c] += 0.5 * floorPush; }
+    }
+  }
+  // ---- the other devices in a combined shot: each a few oriented boxes (c: centre, ax: three unit axes, h: half
+  // sizes, lo / hi: its world bounds). Each segment near one has its five points across the band kept a half
+  // thickness outside it (pushed out along the nearest face, or corner, of the box), with latex's friction on it: a
+  // band dropped on the pad or the block drapes over it and stays
+  obstacleContacts(b) {
+    const r = this._cr ??= [0, 0, 0], n = this._cn ??= [0, 0, 0], f = this._f, t2 = b.t / 2, reach = b.W / 2 + b.t;
+    const hw = b.W / 2 - b.t / 2, U = this.flip ? [hw, hw / 2, 0, -hw / 2, -hw] : [-hw, -hw / 2, 0, hw / 2, hw];
+    for (let s = 0; s < b.n; s++) {
+      if (b.pin[s]) continue;
+      const a = 3 * s, c = 3 * ((s + 1) % b.n);
+      for (const o of this.obstacles) {
+        const mx = 0.5 * (b.x[a] + b.x[c]), my = 0.5 * (b.x[a + 1] + b.x[c + 1]), mz = 0.5 * (b.x[a + 2] + b.x[c + 2]);
+        if (mx < o.lo[0] - reach || mx > o.hi[0] + reach || my < o.lo[1] - reach || my > o.hi[1] + reach || mz < o.lo[2] - reach || mz > o.hi[2] + reach) continue;
+        for (let ui = 0; ui < 5; ui++) {
+          frameOf(b.q, f, 4 * s);
+          const u = U[ui], px = 0.5 * (b.x[a] + b.x[c]) + u * f[0] - o.c[0], py = 0.5 * (b.x[a + 1] + b.x[c + 1]) + u * f[1] - o.c[1], pz = 0.5 * (b.x[a + 2] + b.x[c + 2]) + u * f[2] - o.c[2];
+          const A = o.ax, lx = px * A[0] + py * A[1] + pz * A[2], ly = px * A[3] + py * A[4] + pz * A[5], lz = px * A[6] + py * A[7] + pz * A[8];
+          const qx = Math.abs(lx) - o.h[0], qy = Math.abs(ly) - o.h[1], qz = Math.abs(lz) - o.h[2];
+          const ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0, oz = qz > 0 ? qz : 0, out = Math.sqrt(ox * ox + oy * oy + oz * oz);
+          const inside = Math.min(Math.max(qx, qy, qz), 0), C = out + inside - t2;
+          if (C >= 0) continue;
+          let nx, ny, nz;   // the outward normal, in the box's frame
+          if (out > 1e-6) { nx = Math.sign(lx) * ox / out; ny = Math.sign(ly) * oy / out; nz = Math.sign(lz) * oz / out; }
+          else if (qx >= qy && qx >= qz) { nx = Math.sign(lx) || 1; ny = 0; nz = 0; }
+          else if (qy >= qz) { nx = 0; ny = Math.sign(ly) || 1; nz = 0; }
+          else { nx = 0; ny = 0; nz = Math.sign(lz) || 1; }
+          n[0] = nx * A[0] + ny * A[3] + nz * A[6]; n[1] = nx * A[1] + ny * A[4] + nz * A[7]; n[2] = nx * A[2] + ny * A[5] + nz * A[8];
+          r[0] = u * f[0]; r[1] = u * f[1]; r[2] = u * f[2];
+          const W = this.pointWeight(b, s, r, n);
+          if (W <= 0) continue;
+          this.pushPoint(b, s, r, n, -C / W);
+          this.friction(b, s, u, r, n, -C, MU_OBJ);
+          if (n[1] > 0.5) { b.fc[s] += -0.5 * C; b.fc[(s + 1) % b.n] += -0.5 * C; }   // resting on its top: no bounce, as on the floor
+        }
+      }
     }
   }
   // ---- the pouch (offline). Each segment is inside or outside it at the frame's start (its middle within the walls,
@@ -1605,6 +1645,7 @@ export class BandsRig {
     for (const c of W.clips) { for (const P of [c.p, c.cp]) if (P) { P[0] += dx; P[1] += dy; P[2] += dz; } if (c.tween) for (const P of [c.tween.p0, c.tween.p1]) { P[0] += dx; P[1] += dy; P[2] += dz; } }
     this.placeHandles(); this.updateMeshes();
   }
+  setObstacles(list) { this.world.obstacles = list; this.world.wake(); }
   bounds() { const bb = new THREE.Box3(); for (const M of this.meshes) bb.union(M.geometry.boundingBox); if (this.opts.pouch && this.pouch) bb.union(this.pouch.bounds()); return bb; }
   // ------------------------------------------------ pointer: pick, drag, pin
   pick(ray) {

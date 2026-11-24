@@ -316,7 +316,7 @@ export function createMBandMaterials(maxAniso) {
   // the pod, ring and end bar: satin soft-touch plastic (its broad highlights broken up by the grain, a soft sheen at
   // grazing angles, as on rubbery coatings)
   const plastic = (hex, roughness, grain, shaded) => softTouch(new THREE.MeshPhysicalMaterial({ color: new THREE.Color(hex), roughness, metalness: 0,
-    specularIntensity: 0.6, ior: 1.5, sheen: 0.3, sheenRoughness: 0.55, sheenColor: new THREE.Color('#8e9096'), vertexColors: shaded }), grain);
+    specularIntensity: 0.5, ior: 1.5, clearcoat: 0.12, clearcoatRoughness: 0.35, sheen: 0.22, sheenRoughness: 0.5, sheenColor: new THREE.Color('#8e9096'), vertexColors: shaded }), grain);   // a satin coat: a soft, broad highlight along the curves, as in the photos
   // the sensor panel: the same plastic, its windows and disc glass (a clear coat over the deep red and black under it),
   // set into it; the dots glowing faintly
   const S = sensorTextures(maxAniso, pod.plate.L, pod.plate.W, COLORS.plate);
@@ -324,7 +324,7 @@ export function createMBandMaterials(maxAniso) {
     normalMap: S.normalMap, clearcoat: 1, clearcoatMap: S.clearcoatMap, clearcoatRoughness: 0.04, emissive: new THREE.Color('#ffffff'), emissiveMap: S.emissiveMap, emissiveIntensity: 0.22,
     sheen: 0.25, sheenRoughness: 0.55, sheenColor: new THREE.Color('#8e9096') }), 0.00014);
   return {
-    strap: viewBlend(fabric(weave), square), tip: fabric(tipT), edge: fabric(edgeT), pod: plastic(COLORS.pod, 0.5, 0.00022, true), ring: plastic(COLORS.ring, 0.4, 0.00016, false), plate,
+    strap: viewBlend(fabric(weave), square), tip: fabric(tipT), edge: fabric(edgeT), pod: plastic(COLORS.pod, 0.46, 0.00022, true), ring: plastic(COLORS.ring, 0.4, 0.00016, false), plate,
     led: new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1.1, roughness: 0.3 }),
   };
 }

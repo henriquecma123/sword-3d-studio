@@ -217,7 +217,7 @@ reflectedLight.directDiffuse *= mix(1.0, vAO, 0.35);`);
 
   const glass = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color('#0d0d0e'),   // the references show a soft charcoal glass, not pure black
-    roughness: 0.32,
+    roughness: 0.2,   // under the mirror coat, a faint haze only
     metalness: 0,
     clearcoat: 1,
     clearcoatRoughness: 0.025,
@@ -229,7 +229,7 @@ reflectedLight.directDiffuse *= mix(1.0, vAO, 0.35);`);
     color: new THREE.Color('#000000'),
     emissive: new THREE.Color('#ffffff'),
     emissiveIntensity: 1,
-    roughness: 0.32,
+    roughness: 0.2,
     clearcoat: 1,
     clearcoatRoughness: 0.025,
     specularIntensity: 0.6,

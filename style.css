@@ -123,6 +123,9 @@ section h2 {
 /* six devices: two even rows of three (six in a row would be narrower than their icons) */
 /* ten devices: two rows of five */
 .devices { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
+/* the devices by health area: a small heading over each row */
+.dev-cat + .dev-cat { margin-top: 12px; }
+.dev-cat h3 { margin: 0 0 6px; font: 600 11px/1.2 Figtree, -apple-system, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: var(--grey-600); }
 .devices button {
   display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 16px 2px 12px;
   border: 1.5px solid var(--grey-200); border-radius: var(--radius); background: var(--grey-50);
@@ -131,6 +134,8 @@ section h2 {
 .devices button:hover { border-color: var(--grey-300); background-color: #fff; }
 .devices svg { width: 44px; height: 33px; }
 .devices button span { font-size: 12px; white-space: nowrap; }   /* five to a row */
+/* a narrow panel: the labels a touch smaller and tighter, so the longest (Glucometer) fits its button */
+@media (max-width: 1500px) { .devices button span { font-size: 11px; letter-spacing: -0.015em; } }
 .devices .d-body { fill: #fff; stroke: var(--grey-400); stroke-width: 1.4; }
 .devices .d-screen { fill: var(--grey-300); }
 .devices .d-cap { fill: var(--grey-400); }

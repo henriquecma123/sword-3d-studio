@@ -72,47 +72,72 @@
     <div class="sections">
       <section>
         <h2>Device</h2>
-        <div class="devices" data-seg="device" role="radiogroup" aria-label="Device">
-          <button data-value="pad" class="on" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="3" y="4" width="42" height="28" rx="4" class="d-body" /><rect x="6" y="9" width="36" height="20" rx="1.5" class="d-screen" /><rect x="29" y="4" width="8" height="3.2" rx="1" class="d-cap" /></svg>
-            <span>Thrive Pad</span>
-          </button>
-          <button data-value="iphone" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="16" y="2" width="16" height="32" rx="4" class="d-body" /><rect x="17.6" y="3.6" width="12.8" height="28.8" rx="2.8" class="d-screen" /><rect x="21.5" y="5.2" width="5" height="1.6" rx=".8" class="d-island" /></svg>
-            <span>Vision AI</span>
-          </button>
-          <button data-value="box" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M24 4.5 39.5 10.5V25.5L24 31.5 8.5 25.5V10.5Z" class="d-body" /><path d="M24 4.5 39.5 10.5 24 16.5 8.5 10.5Z" class="d-cap" /><path d="M24 16.5V31.5" class="d-line" /></svg>
-            <span>Box</span>
-          </button>
-          <button data-value="bands" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><ellipse cx="14" cy="18" rx="5.5" ry="14" class="d-band" /><ellipse cx="24" cy="18" rx="5.5" ry="14" class="d-band" /><ellipse cx="34" cy="18" rx="5.5" ry="14" class="d-band" /></svg>
-            <span>Bands</span>
-          </button>
-          <button data-value="mband" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="3.5" y="13" width="5.5" height="10" rx="2.2" class="d-line" /><rect x="7" y="14.5" width="38" height="7" rx="1.5" class="d-cap" /><rect x="12" y="11" width="13" height="14" rx="4" class="d-body" /></svg>
-            <span>M-Band</span>
-          </button>
-          <button data-value="block" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M6 12 11 8H37L32 12Z" class="d-yb-top" /><path d="M4 14 9 10 11 8 6 12Z" class="d-yb-top" /><path d="M32 12 37 8 39 10 34 14Z" class="d-yb-bevel" /><path d="M34 14 39 10V27L34 31Z" class="d-yb-side" /><path d="M34 31 39 27 37 29 32 33Z" class="d-yb-under" /><path d="M6 12H32L34 14V31L32 33H6L4 31V14Z" class="d-yb-front" /><circle cx="12.4" cy="21.4" r="1.35" class="d-yb-ring" /><circle cx="12.4" cy="24.6" r="1.2" class="d-yb-ink" /><rect x="15.2" y="22.15" width="11.4" height="2.4" rx="1.2" class="d-yb-ink" /></svg>
-            <span>Yoga block</span>
-          </button>
-          <button data-value="bloom" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M5 22.5C11 21 16 13 25 9.5S41 6 41.5 13.5 37 26.5 33.5 26.5" class="d-bp-tail" /><ellipse cx="24" cy="26.5" rx="10" ry="5.2" class="d-bp-pod" /><circle cx="5.6" cy="22.3" r="1.6" class="d-bp-end" /></svg>
-            <span>Bloom pod</span>
-          </button>
-          <button data-value="scale" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="9" y="3" width="30" height="30" rx="4" class="d-sc-glass" /><rect x="18.5" y="6.5" width="11" height="4" rx="1" class="d-sc-display" /><ellipse cx="15" cy="13" rx="2.6" ry="3.4" class="d-sc-pad" /><ellipse cx="33" cy="13" rx="2.6" ry="3.4" class="d-sc-pad" /><ellipse cx="15" cy="25" rx="2.6" ry="3.4" class="d-sc-pad" /><ellipse cx="33" cy="25" rx="2.6" ry="3.4" class="d-sc-pad" /></svg>
-            <span>Scale</span>
-          </button>
-          <button data-value="bp" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="14" y="2" width="20" height="32" rx="6" class="d-bp-body" /><rect x="16.5" y="4.5" width="15" height="19" rx="3" class="d-bp-face" /><rect x="19" y="8.5" width="10" height="12" rx="1" class="d-bp-lcd" /><rect x="20.5" y="26.5" width="7" height="5" rx="1.5" class="d-bp-btn" /></svg>
-            <span>BP monitor</span>
-          </button>
-          <button data-value="gluco" role="radio">
-            <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="22.5" y="1" width="3" height="7" rx="0.6" class="d-gl-strip" /><rect x="15" y="6" width="18" height="28" rx="8" class="d-gl-body" /><rect x="17.5" y="11.5" width="13" height="11" rx="1.5" class="d-gl-lcd" /><circle cx="24" cy="28" r="2.6" class="d-gl-btn" /></svg>
-            <span>Glucometer</span>
-          </button>
+        <div class="dev-cat">
+          <h3>Musculoskeletal Health</h3>
+          <div class="devices" data-seg="device" role="radiogroup" aria-label="Musculoskeletal Health">
+            <button data-value="pad" class="on" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="3" y="4" width="42" height="28" rx="4" class="d-body" /><rect x="6" y="9" width="36" height="20" rx="1.5" class="d-screen" /><rect x="29" y="4" width="8" height="3.2" rx="1" class="d-cap" /></svg>
+              <span>Thrive Pad</span>
+            </button>
+            <button data-value="iphone" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="16" y="2" width="16" height="32" rx="4" class="d-body" /><rect x="17.6" y="3.6" width="12.8" height="28.8" rx="2.8" class="d-screen" /><rect x="21.5" y="5.2" width="5" height="1.6" rx=".8" class="d-island" /></svg>
+              <span>Vision AI</span>
+            </button>
+            <button data-value="box" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M24 4.5 39.5 10.5V25.5L24 31.5 8.5 25.5V10.5Z" class="d-body" /><path d="M24 4.5 39.5 10.5 24 16.5 8.5 10.5Z" class="d-cap" /><path d="M24 16.5V31.5" class="d-line" /></svg>
+              <span>Box</span>
+            </button>
+            <button data-value="bands" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><ellipse cx="14" cy="18" rx="5.5" ry="14" class="d-band" /><ellipse cx="24" cy="18" rx="5.5" ry="14" class="d-band" /><ellipse cx="34" cy="18" rx="5.5" ry="14" class="d-band" /></svg>
+              <span>Bands</span>
+            </button>
+            <button data-value="block" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M6 12 11 8H37L32 12Z" class="d-yb-top" /><path d="M4 14 9 10 11 8 6 12Z" class="d-yb-top" /><path d="M32 12 37 8 39 10 34 14Z" class="d-yb-bevel" /><path d="M34 14 39 10V27L34 31Z" class="d-yb-side" /><path d="M34 31 39 27 37 29 32 33Z" class="d-yb-under" /><path d="M6 12H32L34 14V31L32 33H6L4 31V14Z" class="d-yb-front" /><circle cx="12.4" cy="21.4" r="1.35" class="d-yb-ring" /><circle cx="12.4" cy="24.6" r="1.2" class="d-yb-ink" /><rect x="15.2" y="22.15" width="11.4" height="2.4" rx="1.2" class="d-yb-ink" /></svg>
+              <span>Yoga block</span>
+            </button>
+          </div>
+        </div>
+        <div class="dev-cat">
+          <h3>Women's Health</h3>
+          <div class="devices" data-seg="device" role="radiogroup" aria-label="Women's Health">
+            <button data-value="bloom" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M5 22.5C11 21 16 13 25 9.5S41 6 41.5 13.5 37 26.5 33.5 26.5" class="d-bp-tail" /><ellipse cx="24" cy="26.5" rx="10" ry="5.2" class="d-bp-pod" /><circle cx="5.6" cy="22.3" r="1.6" class="d-bp-end" /></svg>
+              <span>Sword pod</span>
+            </button>
+            <button data-value="box" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M24 4.5 39.5 10.5V25.5L24 31.5 8.5 25.5V10.5Z" class="d-body" /><path d="M24 4.5 39.5 10.5 24 16.5 8.5 10.5Z" class="d-cap" /><path d="M24 16.5V31.5" class="d-line" /></svg>
+              <span>Box</span>
+            </button>
+          </div>
+        </div>
+        <div class="dev-cat">
+          <h3>Cardiometabolic Health</h3>
+          <div class="devices" data-seg="device" role="radiogroup" aria-label="Cardiometabolic Health">
+            <button data-value="mband" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="3.5" y="13" width="5.5" height="10" rx="2.2" class="d-line" /><rect x="7" y="14.5" width="38" height="7" rx="1.5" class="d-cap" /><rect x="12" y="11" width="13" height="14" rx="4" class="d-body" /></svg>
+              <span>M-Band</span>
+            </button>
+            <button data-value="scale" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="9" y="3" width="30" height="30" rx="4" class="d-sc-glass" /><rect x="18.5" y="6.5" width="11" height="4" rx="1" class="d-sc-display" /><ellipse cx="15" cy="13" rx="2.6" ry="3.4" class="d-sc-pad" /><ellipse cx="33" cy="13" rx="2.6" ry="3.4" class="d-sc-pad" /><ellipse cx="15" cy="25" rx="2.6" ry="3.4" class="d-sc-pad" /><ellipse cx="33" cy="25" rx="2.6" ry="3.4" class="d-sc-pad" /></svg>
+              <span>Scale</span>
+            </button>
+            <button data-value="bp" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="14" y="2" width="20" height="32" rx="6" class="d-bp-body" /><rect x="16.5" y="4.5" width="15" height="19" rx="3" class="d-bp-face" /><rect x="19" y="8.5" width="10" height="12" rx="1" class="d-bp-lcd" /><rect x="20.5" y="26.5" width="7" height="5" rx="1.5" class="d-bp-btn" /></svg>
+              <span>BP monitor</span>
+            </button>
+            <button data-value="gluco" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="22.5" y="1" width="3" height="7" rx="0.6" class="d-gl-strip" /><rect x="15" y="6" width="18" height="28" rx="8" class="d-gl-body" /><rect x="17.5" y="11.5" width="13" height="11" rx="1.5" class="d-gl-lcd" /><circle cx="24" cy="28" r="2.6" class="d-gl-btn" /></svg>
+              <span>Glucometer</span>
+            </button>
+            <button data-value="bands" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><ellipse cx="14" cy="18" rx="5.5" ry="14" class="d-band" /><ellipse cx="24" cy="18" rx="5.5" ry="14" class="d-band" /><ellipse cx="34" cy="18" rx="5.5" ry="14" class="d-band" /></svg>
+              <span>Bands</span>
+            </button>
+            <button data-value="box" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M24 4.5 39.5 10.5V25.5L24 31.5 8.5 25.5V10.5Z" class="d-body" /><path d="M24 4.5 39.5 10.5 24 16.5 8.5 10.5Z" class="d-cap" /><path d="M24 16.5V31.5" class="d-line" /></svg>
+              <span>Box</span>
+            </button>
+          </div>
         </div>
         <div id="bands-rows" class="hidden">
           <div class="row">
@@ -283,6 +308,16 @@
             <button data-finish="spaceblack" title="Space Black" aria-label="Space Black" style="background:#1e1e20"></button>
             <button data-finish="deepblue" title="Deep Blue" aria-label="Deep Blue" style="background:#323a4d"></button>
           </div>
+        </div>
+      </section>
+
+      <section id="combo-section">
+        <h2>Combine <label class="switch" title="Show other devices beside this one"><input type="checkbox" id="combo-on" aria-label="Combine devices" /><span></span></label></h2>
+        <div id="combo-controls" class="disabled">
+          <div class="chips" id="combo-chips"></div>
+          <div class="slider"><label for="combo-turn" title="How far the device being edited is turned (or scroll while dragging it)">Turn <span id="combo-turn-v"></span></label><input id="combo-turn" type="range" min="-180" max="180" step="1" value="0" /></div>
+          <div class="slider"><label for="combo-gap" title="The space between the devices when arranged in a row">Spacing <span id="combo-gap-v"></span></label><input id="combo-gap" type="range" min="0" max="30" step="0.5" value="4" /></div>
+          <div class="chips"><button id="combo-arrange" title="Put them all back in a row, unturned">Arrange in a row</button></div>
         </div>
       </section>
 

@@ -70,12 +70,12 @@ function toTextures(nx, ny, H, C, R, A, du, dv, depth, wrap, maxAniso, aoR = 0.0
 // blends from one to the other with the view (mband.js)
 export function weaveTextures(maxAniso, Wl, slant = false) {
   const pcOf = (x) => Math.min(1, x * 1.4);
-  const ROWS = 2, NL = 14, TA = 0.48, TC = Wl / 4, PX = 1000;
+  const ROWS = 2, NL = 10, TA = 0.48, TC = Wl / 4, PX = 1000;   // about 40 loops across, as in the photos
   const nx = Math.round(TA * PX), ny = Math.round(TC * PX), du = TA / nx, dv = TC / ny, N = nx * ny;
   const rowP = TA / ROWS, pitch = TC / NL, rnd = rng(23), loops = [];
   for (let r = 0; r < ROWS; r++) for (let k = 0; k < NL; k++) {
     loops.push({ u: (r + 0.5) * rowP + (rnd() - 0.5) * 0.02, v: (k + 0.5 + 0.5 * r + (rnd() - 0.5) * 0.35) * pitch,
-      L: rowP * (0.64 + 0.12 * rnd()), bow: -(0.022 + 0.012 * rnd()), rs: 0.0062 + 0.0018 * rnd(), b: 0.82 + 0.34 * rnd(), ph: rnd(), sl: 0.14 + 0.08 * rnd() });
+      L: rowP * (0.7 + 0.12 * rnd()), bow: -(0.03 + 0.012 * rnd()), rs: 0.0095 + 0.002 * rnd(), b: 0.84 + 0.3 * rnd(), ph: rnd(), sl: 0.14 + 0.08 * rnd() });
   }
   const H = new Float32Array(N), C = new Uint8ClampedArray(3 * N), R = new Float32Array(N), A = new Float32Array(N), D = new Float32Array(2 * N);
   const P1 = TA / 8, P2 = TC / Math.round(TC / 0.06);   // the base's tapes: one family each way, tiling the tile
@@ -86,8 +86,8 @@ export function weaveTextures(maxAniso, Wl, slant = false) {
     const onP = Math.abs(fp - 0.5) < 0.4, onQ = Math.abs(fq - 0.5) < 0.4, pTop = ((Math.floor(p) + Math.floor(q)) & 1) === 0;
     let hgt = 0, col = 24, ro = 0.7, an = 0.1, dx = 1, dy = 0;
     const tape = (f) => Math.sqrt(Math.max(0, 1 - ((f - 0.5) / 0.4) ** 2));
-    if (onP && (pTop || !onQ)) { hgt = 0.16 + 0.1 * tape(fp); col = 58 + 18 * tape(fp); ro = 0.55; }
-    else if (onQ) { hgt = 0.16 + 0.1 * tape(fq); col = 55 + 18 * tape(fq); ro = 0.55; }
+    if (onP && (pTop || !onQ)) { hgt = 0.16 + 0.1 * tape(fp); col = 34 + 12 * tape(fp); ro = 0.62; }
+    else if (onQ) { hgt = 0.16 + 0.1 * tape(fq); col = 32 + 12 * tape(fq); ro = 0.62; }
     // the loops: each a thin strand bowed sideways, rising out of the base and back in
     let best = 0, bl = null, bt = 0, bsl = 0;
     for (const l of loops) {
@@ -100,7 +100,9 @@ export function weaveTextures(maxAniso, Wl, slant = false) {
       if (hh > best) { best = hh; bl = l; bt = x; bsl = slope; }
     }
     if (bl) {
-      hgt = Math.max(hgt, 0.3 + 0.7 * best); col = (slant ? 104 + 40 * pcOf(best) : 86 + 34 * pcOf(best)) * bl.b; ro = 0.35; an = 1;   // (square on, a loop's top faces you: lighter)
+      // a round monofilament: its crown lit, its sides falling into the dark between the loops; a faint twist along it
+      const tw = 0.92 + 0.08 * Math.sin(bt / 0.004 + bl.ph * 6.28);
+      hgt = Math.max(hgt, 0.3 + 0.7 * best); col = (slant ? 70 + 62 * pcOf(best) : 58 + 58 * pcOf(best)) * bl.b * tw; ro = 0.3 + 0.12 * (1 - best); an = 1;   // (square on, a loop's top faces you: lighter)
       const l2 = Math.hypot(1, bsl); dx = 1 / l2; dy = bsl / l2;
     }
     H[k] = hgt; C[3 * k] = col; C[3 * k + 1] = col * 1.012; C[3 * k + 2] = col * 1.05; R[k] = ro; A[k] = an; D[2 * k] = dx; D[2 * k + 1] = dy;
@@ -116,13 +118,13 @@ export function edgeTextures(maxAniso, W, from, to) {
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const u = (i + 0.5) * du, b = (j + 0.5) * dv - to, k = j * nx + i, e = Math.abs(b) - from, w = to - from;
     // strands slanting across the cord, one way on each side, each round; the cord darker towards its middle line
-    const sg = b < 0 ? -1 : 1, ph = u / 0.06 + sg * (e / 0.05), f = ph - Math.floor(ph), st = Math.sqrt(Math.max(0, 1 - ((f - 0.5) / 0.46) ** 2));
+    const sg = b < 0 ? -1 : 1, ph = u / 0.04 + sg * (e / 0.035), f = ph - Math.floor(ph), st = Math.sqrt(Math.max(0, 1 - ((f - 0.5) / 0.46) ** 2));   // a fine braid, as in the photos
     const across = Math.sin(Math.PI * Math.min(1, Math.max(0, e / w)));
-    H[k] = 0.25 + 0.6 * st; const col = (40 + 62 * st) * (0.82 + 0.18 * across);
+    H[k] = 0.4 + 0.35 * st; const col = (34 + 40 * st) * (0.8 + 0.2 * across);
     C[3 * k] = col; C[3 * k + 1] = col * 1.012; C[3 * k + 2] = col * 1.05; R[k] = 0.42 + 0.2 * (1 - st); A[k] = 0.6;
     const l = Math.hypot(0.05, sg * 0.06); D[2 * k] = 0.05 / l; D[2 * k + 1] = (sg * 0.06) / l;   // along the strands
   }
-  return { ...toTextures(nx, ny, H, C, R, A, du, dv, 0.03, true, maxAniso, 0.012, 2, 0.3, D), TA, span };
+  return { ...toTextures(nx, ny, H, C, R, A, du, dv, 0.015, true, maxAniso, 0.01, 1.6, 0.3, D), TA, span };
 }
 
 // the tip's face A, from where its fine weave starts (u = 0) to the end (u = len), across from -W/2 (v = 0) to W/2;
@@ -175,13 +177,21 @@ export function sensorTextures(maxAniso, plL, plW, base) {
   };
   // the windows: deep red glass set into the panel, its frame shading the top of each; the second with its dark end
   const windowFill = (g, x0, x1) => {
-    const gr = g.createLinearGradient(0, Y(-0.2), 0, Y(0.2)); gr.addColorStop(0, '#5e3034'); gr.addColorStop(0.16, '#a1636a'); gr.addColorStop(0.5, '#b27a80'); gr.addColorStop(1, '#7d464b');
+    // deep red under the glass, as in the bottom photo: dark under the frame's top lip, a lighter glow across the
+    // middle (the emitter behind), darker again at the foot
+    const gr = g.createLinearGradient(0, Y(-0.2), 0, Y(0.2)); gr.addColorStop(0, '#3a0c10'); gr.addColorStop(0.18, '#8c2129'); gr.addColorStop(0.45, '#c2434c'); gr.addColorStop(0.62, '#b5363f'); gr.addColorStop(1, '#5e151b');
     return gr;
   };
   const map = draw((g) => {
     g.fillStyle = base; g.fillRect(0, 0, nx, ny);
     shapes(g, (part, x0, x1) => part === 'dot' ? '#f4f4f2' : part === 'window' ? windowFill(g, x0, x1) : part === 'divider' ? '#2c2d31' : part === 'discRim' ? '#3a3b3f' : '#202125');
     g.fillStyle = '#1e1f23'; g.beginPath(); g.roundRect(X(0.28), Y(-0.2), 0.25 * s, 0.4 * s, 0.03 * s); g.fill();   // the second window's dark end
+    // inside each window: the emitter's die, a soft lighter spot, and a faint vertical seam between parts
+    for (const [cx, w] of [[-0.635, 0.35], [0.095, 0.37]]) {
+      const rg = g.createRadialGradient(X(cx), Y(0.02), 0, X(cx), Y(0.02), 0.16 * s); rg.addColorStop(0, 'rgba(236,120,124,0.55)'); rg.addColorStop(1, 'rgba(236,120,124,0)');
+      g.fillStyle = rg; g.fillRect(X(cx - w / 2), Y(-0.2), w * s, 0.4 * s);
+      g.fillStyle = 'rgba(40,6,10,0.35)'; g.fillRect(X(cx + w * 0.18), Y(-0.19), 0.012 * s, 0.38 * s);
+    }
     g.strokeStyle = 'rgba(20,20,24,0.55)'; g.lineWidth = 0.012 * s;                                                  // a fine dark frame round each window
     for (const [x0, x1] of [[-0.81, -0.46], [-0.09, 0.53]]) { g.beginPath(); g.roundRect(X(x0), Y(-0.2), (x1 - x0) * s, 0.4 * s, 0.03 * s); g.stroke(); }
   });

@@ -257,7 +257,7 @@ export function createBPMaterials(maxAniso = 8) {
   const { lcd: D, W, H } = BP, lc = document.createElement('canvas'); lc.width = 1200; lc.height = Math.round((1200 * (D.y1 - D.y0)) / (D.x1 - D.x0));
   drawLCD(lc, MM.reading); MM.lcdCanvas = lc; MM.lcdTex = tex(lc);
   // the face: glossy acrylic and plastic under a clear coat
-  MM.face = new THREE.MeshPhysicalMaterial({ map: MM.faceTex, roughness: 0.2, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.06, specularIntensity: 0.6, ior: 1.49 });
+  MM.face = new THREE.MeshPhysicalMaterial({ map: MM.faceTex, roughness: 0.2, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03, specularIntensity: 0.25, ior: 1.49 });
   const rect = new THREE.Vector4((D.x0 + W / 2) / W, (D.y0 + H / 2) / H, (D.x1 - D.x0) / W, (D.y1 - D.y0) / H);
   MM.faceU = { uLCD: { value: MM.lcdTex }, uRect: { value: rect }, uGlow: { value: 1.5 } };
   MM.face.onBeforeCompile = (sh) => {
@@ -269,10 +269,22 @@ export function createBPMaterials(maxAniso = 8) {
   };
   MM.face.customProgramCacheKey = () => 'bp-face-1';
   MM.shell = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#f1f1f3'), roughness: 0.24, metalness: 0, clearcoat: 0.7, clearcoatRoughness: 0.12, specularIntensity: 0.5, sheen: 0.15, sheenRoughness: 0.5, sheenColor: new THREE.Color('#ffffff') });
+  MM.jack = MM.shell.clone(); MM.jack.vertexColors = true;   // the air jack: the shell's plastic, shaded inside by depth
+  MM.jackBore = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#e6e7ea'), roughness: 0.55, metalness: 0, specularIntensity: 0.25, vertexColors: true });   // inside the jack: matte, little of the studio reaches in
+  // the shell is opened where the jack is set into it (a disc on the left side: centre y, z, radius, and only for x
+  // below .w), so the jack's dish and bore show; set by buildBPMonitor
+  MM.jackHole = new THREE.Vector4(0, 0, 0, -1e9);
+  MM.shell.onBeforeCompile = (sh) => {
+    sh.uniforms.uJackHole = { value: MM.jackHole };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vJackP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvJackP = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vJackP;\nuniform vec4 uJackHole;')
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif ( vJackP.x < uJackHole.w && length( vJackP.yz - uJackHole.xy ) < uJackHole.z ) discard;');
+  };
+  MM.shell.customProgramCacheKey = () => 'bp-shell-jack';
   MM.chrome = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#e4e5e8'), metalness: 1, roughness: 0.1 });
   MM.cap = new THREE.MeshPhysicalMaterial({ map: tex(buttonCanvas()), roughness: 0.3, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.1 });
   MM.port = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#2a2b2e'), roughness: 0.5 });
-  MM.portIn = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#0b0b0c'), roughness: 0.7 });
+  MM.portIn = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#0b0b0c'), roughness: 0.7, side: THREE.DoubleSide });   // the dark ends of the ports, seen from inside or out
   MM.base = new THREE.MeshPhysicalMaterial({ color: new THREE.Color('#e9e9ec'), roughness: 0.5, metalness: 0 });
   // the cuff: grey nylon, its fine plain weave (a tiled normal map, its hollows a cavity map), a soft sheen; its print
   // and bindings a canvas round it, the traced print added when it loads
@@ -350,7 +362,7 @@ export function buildBPMonitor(MM) {
   const shell = [chrome[chrome.length - 1]];
   for (let k = 1; k <= 14; k++) { const s = k / 14; shell.push(ring(0.016 + (flare - 0.016) * Math.sin((Math.PI / 2) * s), (y) => -rimDrop - (D(y) - R - rimDrop) * s)); }
   for (let k = 1; k <= 12; k++) { const a = ((k / 12) * Math.PI) / 2; shell.push(ring(flare - R * (1 - Math.cos(a)), (y) => -(D(y) - R) - R * Math.sin(a))); }
-  add('bp-shell', ringMesh(shell, { centre: [0, 0, -1.5] }), MM.shell);
+  const shellMesh = add('bp-shell', ringMesh(shell, { centre: [0, 0, -1.5] }), MM.shell);
   // the back: flat (a slanted plane), the white of the shell, matte
   const back = shell[shell.length - 1], cb = [0, 0, -D(0)];
   add('bp-back', ringMesh([back, back.map(() => cb)], { centre: [0, 0, 0] }), MM.base);
@@ -369,8 +381,32 @@ export function buildBPMonitor(MM) {
   // the ports, set in the shell's sides at mid depth: the air jack (left) and USB-C with SET above it (right)
   const sideAt = (sx, y) => { let best = out[0], bi = 0; out.forEach((p, i) => { if (Math.sign(p[0]) === sx && Math.abs(p[1] - y) < Math.abs(best[1] - y)) { best = p; bi = i; } }); return { x: best[0] + nrm[bi][0] * flare * 0.95, y: best[1], z: -D(y) * 0.45 }; };
   { const J = BP.jack, s = sideAt(-1, J.y), circ = (r, x) => Array.from({ length: 48 }, (_, i) => { const a = (2 * Math.PI * i) / 48; return [x, s.y + r * Math.cos(a), s.z + r * Math.sin(a)]; });
-    const rings = [circ(J.r, s.x + 0.02), circ(J.r * 0.96, s.x - 0.04), circ(J.r * 0.8, s.x - 0.06), circ(J.hole, s.x - 0.05), circ(J.hole, s.x + 0.25)];
-    add('bp-jack', ringMesh(rings, { centre: [s.x + 1, s.y, s.z] }), MM.shell); add('bp-jack-hole', ringMesh([circ(J.hole * 0.98, s.x + 0.2), circ(0.001, s.x + 0.2)]), MM.portIn); }
+    // set into the side, as in the photos: a soft rounded lip, a shallow countersunk dish, a small raised ring round
+    // the socket's mouth, then the bore going in, darker the deeper it goes (its own shadow), a dark hole at its end.
+    // [radius, depth into the side] (the left side: in is +x)
+    const prof = [[0.53, -0.004], [0.515, 0.006], [0.495, 0.022], [0.47, 0.045], [0.44, 0.068], [0.39, 0.098], [0.34, 0.125], [0.315, 0.138], [0.298, 0.14],
+      [0.284, 0.133], [0.268, 0.118], [0.252, 0.112], [0.238, 0.118], [0.227, 0.135], [0.221, 0.165], [0.22, 0.25], [0.22, 0.4], [0.218, 0.5], [0.21, 0.56], [0.19, 0.585], [0.15, 0.595]];
+    const shade = (d) => (d < 0.11 ? 1 - 0.5 * Math.max(0, d - 0.06) : d < 0.16 ? 0.97 : 0.78 - 0.66 * Math.pow(Math.min(1, (d - 0.16) / 0.43), 0.7));
+    // the side bows out toward the front: each point of the jack is set from the shell's own surface there (a ray in
+    // along +x), so its lip sits on the side all round
+    const ray = new THREE.Raycaster(), surf = (y, z) => { ray.set(new THREE.Vector3(s.x - 3, y, z), new THREE.Vector3(1, 0, 0)); const h = ray.intersectObject(shellMesh, false)[0]; return h ? h.point.x : s.x; };
+    const surfX = circ(0.53, 0).map(([, y, z]) => surf(y, z));
+    const at = (r, d) => Array.from({ length: 48 }, (_, i) => { const a = (2 * Math.PI * i) / 48; return [surfX[i] + d, s.y + r * Math.cos(a), s.z + r * Math.sin(a)]; });
+    const sx = surfX.reduce((t, x) => t + x / 48, 0);
+    // the dish and the socket's ring in the shell's glossy plastic; the bore in a matte one, shaded by its depth
+    const part = (pr, mat, name, wrong = (n) => n.getX(0) > 0) => {   // the dish faces out (-x), the bore its axis
+      const g = ringMesh(pr.map(([r, d]) => at(r, d)));
+      if (wrong(g.attributes.normal)) { const a = g.index.array; for (let k = 0; k < a.length; k += 3) { const t = a[k + 1]; a[k + 1] = a[k + 2]; a[k + 2] = t; } g.computeVertexNormals(); }
+      g.setAttribute('color', new THREE.Float32BufferAttribute(pr.flatMap(([, d]) => { const c = shade(d); return Array.from({ length: 48 }, () => [c, c, c]).flat(); }), 3));
+      return add(name, g, mat);
+    };
+    const cut = prof.findIndex(([, d]) => d >= 0.165);
+    part(prof.slice(cut), MM.jackBore, 'bp-jack-bore', (n) => n.getY(0) > 0);
+    part(prof.slice(0, cut + 1), MM.jack, 'bp-jack-dish');
+    MM.jackHole?.set(s.y, s.z, 0.508, sx + 0.5);
+    add('bp-jack-hole', ringMesh([at(0.15, 0.595), at(0.14, 0.8), at(0.001, 0.8)], { centre: [sx - 1, s.y, s.z] }), MM.portIn);
+    // where the plug's collar sits (in the dish) is 0.26 out from this point
+    const ref = new THREE.Object3D(); ref.name = 'bp-jack-ref'; ref.position.set(sx + 0.06 + 0.26, s.y, s.z); body.add(ref); }
   { const U = BP.usb, s = sideAt(1, U.y), slot = (w, h, x) => roundRect(h, w, h / 2 - 0.001, 64).map(([a, b]) => [x, s.y + b, s.z + a]);
     add('bp-usb', ringMesh([slot(U.w + 0.12, U.h + 0.12, s.x + 0.01), slot(U.w, U.h, s.x - 0.02), slot(U.w, U.h, s.x - 0.3)], { centre: [s.x + 1, s.y, s.z] }), MM.port);
     add('bp-usb-in', ringMesh([slot(U.w * 0.6, U.h * 0.35, s.x - 0.12), slot(0.001, 0.001, s.x - 0.12)]), MM.portIn); }
@@ -432,7 +468,7 @@ export function visibleBox(obj) {
   obj.traverse((o) => { if (!o.isMesh) return; for (let p = o; p; p = p.parent) if (!p.visible) return; box.expandByObject(o, true); });
   return box;
 }
-// standing on its button end, leaning back a little (as the images); lying on its back, face up
+// standing on its button end, leaning back a little (as the images); lying flat on its back
 export function poseBPMonitor(grp, pose, withCuff = true, MM = null) {
   // worked out in the group's own frame (it may already be placed in the studio), then put back
   const keep = [grp.position.clone(), grp.quaternion.clone(), grp.scale.clone()];
@@ -443,7 +479,9 @@ export function poseBPMonitor(grp, pose, withCuff = true, MM = null) {
 function poseInFrame(grp, pose, withCuff, MM) {
   const body = grp.getObjectByName('bp-body'), cuff = grp.getObjectByName('bp-cuff');
   body.rotation.set(0, 0, 0);
-  if (pose === 'lying') body.rotation.x = -Math.PI / 2;
+  // lying on its back: the back is a slanted plane (the shell 4.2 cm deep at the top, 3.0 at the bottom), so it rests
+  // flat on it, the face tipped up a little towards its bottom end, as a real one lies on a table
+  if (pose === 'lying') body.rotation.x = -Math.PI / 2 + Math.atan((BP.depth.top - BP.depth.bottom) / BP.H);
   else body.rotation.x = -(8 * Math.PI) / 180;
   grp.userData.pose = pose;
   const old = grp.getObjectByName('bp-tube'); if (old) { old.traverse((o) => o.geometry?.dispose()); grp.remove(old); }
@@ -458,8 +496,8 @@ function poseInFrame(grp, pose, withCuff, MM) {
     cuff.rotation.set(0, 0, 0);
     cuff.position.set(b.max.x + 0.1, b.min.y, b.min.z - C.rz + 0.3);   // tucked behind, about 3.4 cm of it beyond the monitor's right edge (ref-4)
   }
-  const jackMesh = body.getObjectByName('bp-jack-hole'); grp.updateMatrixWorld(true);
-  const J = new THREE.Box3().setFromObject(jackMesh, true).getCenter(new THREE.Vector3());
+  grp.updateMatrixWorld(true);
+  const J = body.getObjectByName('bp-jack-ref').getWorldPosition(new THREE.Vector3());
   const cx = cuff.position.x, cy = cuff.position.y, cz = cuff.position.z, top = b.min.y + C.h, r = TUBE_R, fl = b.min.y + r + 0.005, V = (x, y, z) => new THREE.Vector3(x, y, z);
   const mat = MM ? MM.tube : new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
   const tubes = new THREE.Group(); tubes.name = 'bp-tube'; grp.add(tubes);
@@ -521,5 +559,5 @@ function poseInFrame(grp, pose, withCuff, MM) {
   loop.push(...lead, V(E.x + 0.1, E.y, E.z));
   hose(loop, 'bp-tube-loop');
   const plug = new THREE.Mesh(plugGeometry(r), MM ? MM.plug : mat); plug.name = 'bp-tube-plug'; plug.castShadow = true;
-  plug.position.copy(J); plug.position.x -= 0.26; tubes.add(plug);   // its collar against the jack's boss
+  plug.position.copy(J); plug.position.x -= 0.26; tubes.add(plug);   // its collar in the jack's dish
 }

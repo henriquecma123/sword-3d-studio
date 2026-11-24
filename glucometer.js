@@ -183,7 +183,7 @@ export function createGlucoMaterials(maxAniso = 8) {
   const lc = document.createElement('canvas'); lc.width = 1200; lc.height = Math.round((1200 * (py1 - py0)) / (px1 - px0));
   drawLCD(lc, MM.reading); MM.lcdCanvas = lc; MM.lcdTex = tex(lc);
   // the face: glossy white plastic under a clear window; the LCD's light added inside the panel
-  MM.face = new THREE.MeshPhysicalMaterial({ map: MM.faceTex, roughness: 0.22, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.05, specularIntensity: 0.55, ior: 1.5 });
+  MM.face = new THREE.MeshPhysicalMaterial({ map: MM.faceTex, roughness: 0.22, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03, specularIntensity: 0.25, ior: 1.5 });
   const rect = new THREE.Vector4((px0 + W / 2) / W, (py0 + H / 2) / H, (px1 - px0) / W, (py1 - py0) / H);
   MM.faceU = { uLCD: { value: MM.lcdTex }, uRect: { value: rect }, uGlow: { value: 1.5 } };
   MM.face.onBeforeCompile = (sh) => {
