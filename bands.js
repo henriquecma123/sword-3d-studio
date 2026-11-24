@@ -27,6 +27,10 @@ const HOOK_R = 0.9;                                      // hook radius, cm: a s
 const MU_FLOOR = 0.9, MU_HOOK = 0.6, MU_BAND = 0.5;      // latex grips
 const MU_CLOTH = 0.35;                                    // latex on polyester twill
 const MU_OBJ = 0.7;                                      // latex on the other devices' plastic and glass
+// a device moved into a band pushes it out at most this far each substep (cm): deep, it is worked out over a few
+// substeps rather than in one jump (which the solver turned into a fling); a point touching a device moves no faster
+// than OBJ_VMAX (cm/s) away from it, and no band point faster than VMAX (a safety net against wild throws)
+const OBJ_PUSH = 0.2, OBJ_VMAX = 35, VMAX = 260, OBJ_DAMP = 0.7;
 const SUB = 3;                                           // render stations per segment
 // the segments' turning inertia, x10: with their true (tiny) inertia the bending and shear constraints pump energy
 // into the rotations; heavier rotations are stable and change only how fast a twist swings, not the shapes
@@ -333,6 +337,19 @@ export class BandWorld {
       const { n, x, xp, v, q, qp, om, iw, iwr, fc } = b;
       for (let i = 0; i < n; i++) {
         for (let k = 0; k < 3; k++) v[3 * i + k] = iw[i] > 0 ? (x[3 * i + k] - xp[3 * i + k]) / h : 0;
+        { // a point touching a device: latex on plastic, it neither bounces off nor buzzes against it. Its speed into the
+          // device is taken away and most of its sliding along it (OBJ_DAMP a substep), so a band laid on a device
+          // settles there; and it is never thrown off faster than OBJ_VMAX. Every point: no faster than VMAX
+          const touch = b.oc && b.oc[i];
+          if (touch) {
+            const on = b.on, nx = on[3 * i], ny = on[3 * i + 1], nz = on[3 * i + 2], nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+            if (nl > 1e-6) { const dn = (v[3 * i] * nx + v[3 * i + 1] * ny + v[3 * i + 2] * nz) / nl; if (dn < 0) { v[3 * i] -= dn * nx / nl; v[3 * i + 1] -= dn * ny / nl; v[3 * i + 2] -= dn * nz / nl; } }
+            v[3 * i] *= OBJ_DAMP; v[3 * i + 1] *= OBJ_DAMP; v[3 * i + 2] *= OBJ_DAMP;
+            on[3 * i] = on[3 * i + 1] = on[3 * i + 2] = 0; b.oc[i] = 0;
+          }
+          const lim = touch ? OBJ_VMAX : VMAX, sp = Math.sqrt(v[3 * i] * v[3 * i] + v[3 * i + 1] * v[3 * i + 1] + v[3 * i + 2] * v[3 * i + 2]);
+          if (sp > lim) { const k = lim / sp; v[3 * i] *= k; v[3 * i + 1] *= k; v[3 * i + 2] *= k; }
+        }
         if (fc[i] > 0) { if (v[3 * i + 1] > 0) v[3 * i + 1] = 0; fc[i] = 0; }   // on the floor: no bounce
         if (iwr[i] > 0) {
           // angular velocity from the change of orientation: 2 Im(q conj(qp)) / h
@@ -658,9 +675,12 @@ export class BandWorld {
           r[0] = u * f[0]; r[1] = u * f[1]; r[2] = u * f[2];
           const W = this.pointWeight(b, s, r, n);
           if (W <= 0) continue;
-          this.pushPoint(b, s, r, n, -C / W);
-          this.friction(b, s, u, r, n, -C, MU_OBJ);
-          if (n[1] > 0.5) { b.fc[s] += -0.5 * C; b.fc[(s + 1) % b.n] += -0.5 * C; }   // resting on its top: no bounce, as on the floor
+          const push = Math.min(-C, OBJ_PUSH);
+          this.pushPoint(b, s, r, n, push / W);
+          this.friction(b, s, u, r, n, push, MU_OBJ);
+          const oc = (b.oc ??= new Uint8Array(b.n)), on = (b.on ??= new Float32Array(3 * b.n)), s2 = (s + 1) % b.n;   // touching a device: its normal kept (see the velocities)
+          oc[s] = 1; oc[s2] = 1; for (let k = 0; k < 3; k++) { on[3 * s + k] += n[k]; on[3 * s2 + k] += n[k]; }
+          if (n[1] > 0.5) { b.fc[s] += 0.5 * push; b.fc[(s + 1) % b.n] += 0.5 * push; }   // resting on its top: no bounce, as on the floor
         }
       }
     }
@@ -1362,6 +1382,70 @@ const SLOTS = {
   standing: [[{ x: 0, z: 0 }], [{ x: 3, z: -5.5 }, { x: -3, z: 5.5 }], [{ x: 5, z: -11, yaw: -6 }, { x: -3, z: 0, yaw: 3 }, { x: 4, z: 11, yaw: -4 }]],
 };
 
+// ---------------------------------------------------------------- a band's shape, for afterSettle
+const RECRUMPLE = 1.5;
+// how far (cm, rms) its points are from its healthy shape's, that shape set where it is now and turned as it is now
+function shapeGap(b) {
+  const H = b.healthy, now = bandPose(b.x);
+  let best = Infinity;
+  for (const flip of [0, Math.PI]) {   // (its long axis either way round)
+    const da = now.ang - H.ang + flip, c = Math.cos(da), s = Math.sin(da);
+    let sum = 0;
+    for (let i = 0; i < b.n; i++) {
+      const dx = H.x[3 * i] - H.cx, dz = H.x[3 * i + 2] - H.cz;
+      const ex = now.cx + c * dx - s * dz - b.x[3 * i], ey = H.x[3 * i + 1] - b.x[3 * i + 1], ez = now.cz + s * dx + c * dz - b.x[3 * i + 2];
+      sum += ex * ex + ey * ey + ez * ez;
+    }
+    best = Math.min(best, Math.sqrt(sum / b.n));
+  }
+  return best;
+}
+// where it lies on the floor: its middle, and the direction of its long axis (from the spread of its points)
+function bandPose(x) {
+  const n = x.length / 3; let cx = 0, cz = 0;
+  for (let i = 0; i < n; i++) { cx += x[3 * i]; cz += x[3 * i + 2]; }
+  cx /= n; cz /= n;
+  let sxx = 0, szz = 0, sxz = 0;
+  for (let i = 0; i < n; i++) { const dx = x[3 * i] - cx, dz = x[3 * i + 2] - cz; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; }
+  return { cx, cz, ang: 0.5 * Math.atan2(2 * sxz, sxx - szz) };
+}
+// laid out again in its healthy shape, clear of the other bands: where it last lay healthy if that is clear, else where
+// it is now (turned as it is now, its long axis kept), else the nearest clear spot round there
+function reformBand(b, others, obstacles = []) {
+  const H = b.healthy, now = bandPose(b.x), n = b.n;
+  let da = now.ang - H.ang; da -= Math.PI * Math.round(da / Math.PI);   // (an axis: the nearer of its two ends)
+  { // of the two ways round, the one its points are nearer to
+    const gap = (a) => { const c = Math.cos(a), s = Math.sin(a); let sum = 0; for (let i = 0; i < n; i++) { const dx = H.x[3 * i] - H.cx, dz = H.x[3 * i + 2] - H.cz, ex = now.cx + c * dx - s * dz - b.x[3 * i], ez = now.cz + s * dx + c * dz - b.x[3 * i + 2]; sum += ex * ex + ez * ez; } return sum; };
+    if (gap(da + Math.PI) < gap(da)) da += Math.PI;
+  }
+  const place = (cx, cz, a) => {   // the healthy shape set with its middle at cx, cz, turned by a
+    const c = Math.cos(a), s = Math.sin(a), X = new Float64Array(3 * n);
+    for (let i = 0; i < n; i++) { const dx = H.x[3 * i] - H.cx, dz = H.x[3 * i + 2] - H.cz; X[3 * i] = cx + c * dx - s * dz; X[3 * i + 1] = H.x[3 * i + 1]; X[3 * i + 2] = cz + s * dx + c * dz; }
+    return X;
+  };
+  const clear = (X) => {   // no point within 3 cm of another band's (a band is 5 cm wide), nor in or by a device
+    for (const o of others) for (let j = 0; j < o.n; j += 2) {
+      const ox = o.x[3 * j], oy = o.x[3 * j + 1], oz = o.x[3 * j + 2];
+      for (let i = 0; i < n; i += 2) { const ex = X[3 * i] - ox, ey = X[3 * i + 1] - oy, ez = X[3 * i + 2] - oz; if (ex * ex + ey * ey + ez * ez < 9) return false; }
+    }
+    for (const o of obstacles) for (let i = 0; i < n; i++) {
+      const x = X[3 * i], y = X[3 * i + 1], z = X[3 * i + 2];
+      if (x > o.lo[0] - 1.5 && x < o.hi[0] + 1.5 && y > o.lo[1] - 1.5 && y < o.hi[1] + 1.5 && z > o.lo[2] - 1.5 && z < o.hi[2] + 1.5) return false;
+    }
+    return true;
+  };
+  let X = null, a = 0;
+  const tries = [[H.cx, H.cz, 0], [now.cx, now.cz, da]];
+  for (let r = 2; r <= 30; r += 2) for (let k = 0; k < 12; k++) tries.push([now.cx + r * Math.cos(k * Math.PI / 6), now.cz + r * Math.sin(k * Math.PI / 6), da]);
+  for (const [cx, cz, ang] of tries) { const P = place(cx, cz, ang); if (clear(P)) { X = P; a = ang; break; } }
+  if (!X) return false;   // nowhere clear: left as it is
+  b.x.set(X);
+  const qy = [0, Math.sin(-a / 2), 0, Math.cos(-a / 2)];   // turning by a about +y, as atan2 measures it (x to z)
+  for (let i = 0; i < n; i++) b.q.set(qmul(qy, [H.q[4 * i], H.q[4 * i + 1], H.q[4 * i + 2], H.q[4 * i + 3]]), 4 * i);
+  b.xp.set(b.x); b.qp.set(b.q); b.v.fill(0); b.om.fill(0); b.lamS.fill(0); b.lamB.fill(0);
+  return true;
+}
+
 export class BandsRig {
   constructor(maxAniso) {
     this.world = new BandWorld();
@@ -1620,6 +1704,7 @@ export class BandsRig {
       return false;
     }
     W.step(1 / 60);
+    if (!W.awake) this.afterSettle();   // just come to rest: is any band crumpled out of shape?
     if (this.settleHeight && this.frame++ > 0) {   // keep the floating presets at their height while they form
       const low = this.lowest();
       if (Number.isFinite(low)) this.shift(0, this.opts.lift - low, 0);
@@ -1636,6 +1721,36 @@ export class BandsRig {
     return true;
   }
   updateMeshes() { for (const M of this.meshes) M.update(); }
+  // A loose band (lying or standing on the floor, not held, not shaped by hand, not draped over a device) that has
+  // come to rest crumpled out of its shape (buckled into a wavy wall, say, by a knock or a drop) is laid out again in
+  // its own healthy shape where it is, and settles again. Its healthy shape: as it first came to rest after its preset
+  // was laid out. Crumpled: its points, the shapes lined up (middle and long axis), more than RECRUMPLE cm (rms) from
+  // the healthy shape's (a crumpled band can turn through as much as a healthy one, so its shape itself is compared)
+  afterSettle() {
+    const W = this.world, o = this.opts;
+    if (o.pos !== 'surface' || o.pouch) return;
+    let again = false;
+    for (const b of W.bands) {
+      if (b.userShaped || W.clips.some((c) => c.band === b) || W.hooks.some((h) => this.hooked(h, b))) continue;
+      if (!b.healthy) {   // recorded only resting on the floor, clear of the devices (not perched on one)
+        let low = Infinity; for (let i = 0; i < b.n; i++) low = Math.min(low, b.x[3 * i + 1]);
+        if (low < b.W / 2 + 0.6 && !this.nearObstacle(b)) b.healthy = { x: b.x.slice(), q: b.q.slice(), ...bandPose(b.x) };
+        continue;
+      }
+      if (shapeGap(b) < RECRUMPLE) { b.reforms = 0; continue; }
+      if ((b.reforms || 0) >= 2 || this.nearObstacle(b)) continue;
+      if (reformBand(b, W.bands.filter((o) => o !== b), W.obstacles)) again = true;
+      b.reforms = (b.reforms || 0) + 1;
+    }
+    if (again) W.wake();
+  }
+  nearObstacle(b) {
+    for (const o of this.world.obstacles) for (let i = 0; i < b.n; i++) {
+      const x = b.x[3 * i], y = b.x[3 * i + 1], z = b.x[3 * i + 2];
+      if (x > o.lo[0] - 1 && x < o.hi[0] + 1 && y > o.lo[1] - 1 && y < o.hi[1] + 1 && z > o.lo[2] - 1 && z < o.hi[2] + 1) return true;
+    }
+    return false;
+  }
   lowest() { let m = Infinity; for (const M of this.meshes) m = Math.min(m, M.geometry.boundingBox.min.y); return m; }
   // move everything (bands, hooks, clips) rigidly
   shift(dx, dy, dz) {
@@ -1659,6 +1774,7 @@ export class BandsRig {
   }
   startDrag(hit, mode) {   // mode: 'pull' (grab the band), 'move' (the whole band), or a pin
     const W = this.world, p = hit.point.clone();
+    if (hit.band) hit.band.userShaped = true;   // shaped by hand: left as it is (see afterSettle)
     if (hit.pin) {
       const P = hit.pin, ref = P.hook ? new THREE.Vector3(...P.hook.a).add(new THREE.Vector3(...P.hook.b)).multiplyScalar(0.5) : new THREE.Vector3(...P.clip.p);
       if (P.clip) P.clip.tween = null; if (P.hook) P.hook.tween = null;

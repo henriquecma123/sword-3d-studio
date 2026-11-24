@@ -131,6 +131,7 @@ section h2 {
 .kit { padding: 3px 9px; border: 1px solid var(--grey-200); border-radius: 999px; background: #fff; font: 500 11px/1.2 Figtree, -apple-system, sans-serif; color: var(--grey-700); cursor: pointer; transition: border-color .15s, background-color .15s; }
 .kit:hover { border-color: var(--grey-400); }
 .kit:active { background: var(--grey-100); }
+.kit.on { background: var(--grey-800); border-color: var(--grey-800); color: #fff; }   /* combining: Uncombine */
 /* combining: each card's tick puts it in the shot or takes it out; the one being edited keeps its gradient border */
 .devices button { position: relative; }
 .dev-check { position: absolute; top: 5px; right: 5px; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--grey-300); background: #fff; display: none; cursor: pointer; transition: background-color .15s, border-color .15s; }
@@ -140,9 +141,9 @@ section h2 {
 .dev-check.on::after { content: ''; position: absolute; left: 4.5px; top: 1.5px; width: 3.5px; height: 7px; border: solid #fff; border-width: 0 1.6px 1.6px 0; transform: rotate(45deg); }
 .devices button.in-shot { background: #fff; border-color: var(--grey-400); }
 /* in the view: the device being edited, outlined and named (on screen only, never in the image) */
-#sel-outline { position: absolute; z-index: 3; pointer-events: none; border: 1.5px solid rgba(154, 110, 205, .85); border-radius: 12px; box-shadow: 0 0 0 4px rgba(190, 149, 229, .16); display: none; opacity: 0; transform: scale(.985); transition: opacity .5s ease, transform .5s ease; }
-/* shown for a moment when a device is selected, then faded away */
-#sel-outline.flash { opacity: 1; transform: none; transition: opacity .2s ease, transform .2s ease; }
+#sel-outline { position: absolute; z-index: 3; pointer-events: none; border: 1px solid rgba(170, 130, 215, .55); border-radius: 12px; box-shadow: 0 0 0 3px rgba(190, 149, 229, .10); display: none; opacity: 0; transform: scale(.99); transition: opacity .28s ease-out, transform .28s ease-out; }
+/* a quick, soft blink when a device is selected (in .12 s, held, out .28 s: about .7 s in all) */
+#sel-outline.flash { opacity: 1; transform: none; transition: opacity .12s ease-out, transform .12s ease-out; }
 #sel-outline span { position: absolute; left: -1.5px; bottom: calc(100% + 6px); padding: 3px 9px; border-radius: 999px; background: #fff; box-shadow: var(--shadow-sm); font: 600 11px/1.2 Figtree, -apple-system, sans-serif; color: var(--grey-800); white-space: nowrap; }
 .devices button {
   display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 16px 2px 12px;
