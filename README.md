@@ -6,7 +6,7 @@ Product shots of Sword devices from any angle, in the browser, grouped by health
 - Women's Health: Sword pod, box
 - Cardiometabolic Health: M-Band, smart scale, blood pressure monitor, glucometer, resistance bands, box
 
-Set the camera, light and floor, then export PNGs. Combine shows several devices in one shot: drag each to place it, scroll to turn it. They rest on the floor or on each other, and the bands drape over the others.
+Set the camera, light and floor, then export PNGs. Combine shows several devices in one shot: tick them on their cards (or ⇧-click a card), or use "Combine all" for a whole health area's kit. Drag each to place it and scroll to turn it. They rest on the floor or on each other, and the bands drape over the others.
 
 Live: https://sword.3d-studio.workers.dev/
 

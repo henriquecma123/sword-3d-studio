@@ -1085,6 +1085,33 @@ function renderMain() {
   renderer.render(scene, camera);
 }
 
+// combined: the device just selected outlined in the view for a moment, its name above it (on screen only)
+const selBox = document.createElement('div'); selBox.id = 'sel-outline'; selBox.innerHTML = '<span></span>';
+stage.appendChild(selBox);
+const _corner = new THREE.Vector3();
+let selFor = '', selTimer = 0;
+function flashSel() {   // fades in, holds a second, fades out
+  selBox.classList.add('flash'); clearTimeout(selTimer);
+  selTimer = setTimeout(() => selBox.classList.remove('flash'), 1000);
+}
+function updateSelOutline() {
+  if (!comboOn()) { selBox.style.display = 'none'; selFor = ''; selBox.classList.remove('flash'); return; }
+  if (selFor !== state.device) { selFor = state.device; requestAnimationFrame(flashSel); }   // a device selected
+  const b = boundsOfDevice(state.device);
+  if (b.isEmpty()) { selBox.style.display = 'none'; return; }
+  const cv = renderer.domElement.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < 8; i++) {
+    _corner.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera);
+    if (_corner.z > 1) { selBox.style.display = 'none'; return; }
+    const x = (_corner.x + 1) / 2 * cv.width, y = (1 - _corner.y) / 2 * cv.height;
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  const pad = 8, ox = cv.left - sr.left, oy = cv.top - sr.top;
+  Object.assign(selBox.style, { display: 'block', left: `${ox + x0 - pad}px`, top: `${oy + y0 - pad}px`, width: `${x1 - x0 + 2 * pad}px`, height: `${y1 - y0 + 2 * pad}px` });
+  const name = COMBO_NAMES[state.device]; if (selBox.firstChild.textContent !== name) selBox.firstChild.textContent = name;
+}
+
 let padCheck = 0;
 function loop() {
   requestAnimationFrame(loop);
@@ -1099,7 +1126,7 @@ function loop() {
     if (bandsIn() && liveDirty) { liveShadow(); dirty = true; }
     if (!moving && accumulate(IS_TOUCH ? 16 : 24)) dirty = true;
   }
-  if (dirty) { renderMain(); dirty = false; }
+  if (dirty) { renderMain(); updateSelOutline(); dirty = false; }
 }
 
 // ---------------------------------------------------------------- viewport sizing
@@ -1275,6 +1302,7 @@ function setSeg(name, value) {
 document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   const name = g.dataset.seg, v = b.dataset.value;
+  if (name === 'device' && e.shiftKey) { toggleInShot(v); return; }   // ⇧-click: in the shot, or out of it
   setSeg(name, v);
   if (name === 'device') {
     // the box and the bands keep their own light and floor shadow (their look depends on them); the others share theirs
@@ -1337,9 +1365,26 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
 }));
 
 // Combine: the devices to show with the one being edited
+// the ticks on the device cards: in the shot or not (the one being edited always is)
+const devSection = document.querySelector('.dev-cat').closest('section');
+document.querySelectorAll('.devices button[data-value]').forEach((b) => {
+  const c = document.createElement('span'); c.className = 'dev-check'; c.dataset.check = b.dataset.value;
+  c.setAttribute('role', 'checkbox'); c.title = 'In the shot';
+  c.addEventListener('click', (e) => {
+    e.stopPropagation(); e.preventDefault();
+    toggleInShot(c.dataset.check);
+  });
+  b.appendChild(c);
+});
 function renderCombo() {
   $('#combo-controls').classList.toggle('disabled', !state.comboOn);
-  $('#combo-chips').innerHTML = COMBO_ORDER.map((d) => `<button data-combo="${d}" class="${d === state.device || state.combo.includes(d) ? 'on' : ''}"${d === state.device ? ' disabled title="The device being edited"' : ''}>${COMBO_NAMES[d]}</button>`).join('');
+  devSection.classList.toggle('combining', state.comboOn);
+  document.querySelectorAll('.dev-check').forEach((c) => {
+    const d = c.dataset.check, inShot = d === state.device || state.combo.includes(d);
+    c.classList.toggle('on', inShot);
+    c.setAttribute('aria-checked', String(inShot)); c.title = inShot ? 'In the shot: click (or ⇧-click the card) to take it out' : 'Click (or ⇧-click the card) to add it to the shot';
+    c.closest('button').classList.toggle('in-shot', state.comboOn && inShot && d !== state.device);
+  });
   const P = state.comboPos[state.device];
   turnRange.el.value = P?.rot ?? 0; turnRange.show();
   $('#combo-turn').closest('.slider').classList.toggle('disabled', !comboOn());
@@ -1349,13 +1394,37 @@ function comboChanged() {
   syncSetupUI(); applyPose(); updateLights(); frame(); drawLightPad(); renderCombo(); requestRender();
 }
 $('#combo-on').addEventListener('change', (e) => { state.comboOn = e.target.checked; comboChanged(); });
-$('#combo-chips').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-combo]'); if (!b || b.disabled) return;
-  const d = b.dataset.combo, i = state.combo.indexOf(d);
-  if (i >= 0) state.combo.splice(i, 1); else state.combo.push(d);
-  if (state.combo.length && !state.comboOn) { state.comboOn = true; $('#combo-on').checked = true; }
+// a device out of the shot forgets its place: put back in, it starts afresh (beside the others, unturned)
+function forgetPlace(d) { delete state.comboPos[d]; state.comboStack = state.comboStack.filter((k) => k !== d); }
+// ⇧-click a device card, or its tick: put it in the shot (Combine turns on), or take it out if it is in. The one being
+// edited taken out: editing moves to another in the shot
+function toggleInShot(d) {
+  if (!state.comboOn) { state.comboOn = true; $('#combo-on').checked = true; if (d !== state.device && !state.combo.includes(d)) { forgetPlace(d); state.combo.push(d); } return comboChanged(); }
+  if (d !== state.device) {
+    const i = state.combo.indexOf(d);
+    if (i >= 0) { state.combo.splice(i, 1); forgetPlace(d); } else { forgetPlace(d); state.combo.push(d); }
+    return comboChanged();
+  }
+  const next = members().find((m) => m !== d);
+  if (!next) return;   // alone in the shot: nothing to take it out of
+  state.combo = state.combo.filter((m) => m !== d && m !== next);
+  pickedInView = true; document.querySelector(`[data-seg="device"] button[data-value="${next}"]`)?.click(); pickedInView = false;
+  state.combo = state.combo.filter((m) => m !== d);   // (the switch puts the last one edited back in the shot)
+  forgetPlace(d);
   comboChanged();
-});
+}
+// a health area's kit: all of it in one shot, in a row
+const KITS = { msk: ['pad', 'iphone', 'box', 'bands', 'block'], womens: ['bloom', 'box'], cardio: ['mband', 'scale', 'bp', 'gluco', 'bands', 'box'] };
+document.querySelectorAll('.kit').forEach((k) => k.addEventListener('click', () => {
+  const kit = KITS[k.dataset.kit];
+  state.comboOn = true; $('#combo-on').checked = true;
+  if (!kit.includes(state.device)) { pickedInView = true; document.querySelector(`[data-seg="device"] button[data-value="${kit[0]}"]`)?.click(); pickedInView = false; }
+  for (const d of members()) if (!kit.includes(d)) forgetPlace(d);
+  state.combo = [...kit];
+  if (bandsIn() && !bandsRig.meshes.length) bandsRig.setup();
+  syncSetupUI(); applyPose();
+  arrangeRow(); comboMoved(); setFloor(false); updateLights(); frame(); drawLightPad(); renderCombo();
+}));
 // a placement change: only the placements are worked out again; the floor shadow restarts
 function comboMoved() { placeCombo(); syncPhoenix(); markShadowDirty(); resetShadow(); requestRender(); }
 const turnRange = bindRange('combo-turn', null, deg, (v) => { const P = state.comboPos[state.device]; if (!comboOn() || !P) return; P.rot = v; comboMoved(); });
@@ -1959,6 +2028,7 @@ stage.addEventListener('pointerdown', (e) => {
   dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), hit.point);
   objDrag = { id: e.pointerId, d: hit.d, start: hit.point.clone(), x0: P.x, z0: P.z, moved: false };
   state.comboStack = state.comboStack.filter((k) => k !== hit.d).concat(hit.d);   // put down last: it lands on top
+  flashSel();   // picked in the view: outlined for a moment
   try { stage.setPointerCapture(e.pointerId); } catch { /* gone */ }
   stage.style.cursor = 'grabbing';
 }, { capture: true });
@@ -1970,6 +2040,14 @@ stage.addEventListener('pointermove', (e) => {
   P.x = objDrag.x0 + hitP.x - objDrag.start.x; P.z = objDrag.z0 + hitP.z - objDrag.start.z; objDrag.moved = true;
   if (!dragRaf) dragRaf = requestAnimationFrame(() => { dragRaf = 0; comboMoved(); });
 }, { capture: true });
+let hoverT = 0;
+stage.addEventListener('pointermove', (e) => {
+  if (!comboOn()) { if (renderer.domElement.style.cursor) renderer.domElement.style.cursor = ''; return; }
+  if (objDrag || bandDrag || e.buttons) return;
+  const now = performance.now(); if (now - hoverT < 80) return; hoverT = now;
+  const hit = pickMember(rayAt(e));
+  renderer.domElement.style.cursor = hit && !(hit.d === 'bands' && isBands()) ? 'move' : '';
+});
 const endObjDrag = (e) => {
   if (!objDrag || e.pointerId !== objDrag.id) return;
   e.stopPropagation();
