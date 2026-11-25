@@ -207,12 +207,15 @@ function buildCard(front, back, w, h, notchR, PBM) {
     const geo = new THREE.ShapeGeometry(shape, 8), uv = geo.attributes.uv, P = geo.attributes.position;
     for (let i = 0; i < uv.count; i++) uv.setXY(i, (P.getX(i) + hw) / w, (P.getY(i) + hh) / h);
     const m = new THREE.Mesh(geo, new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.5, specularIntensity: 0.45, sheen: 0.15, sheenRoughness: 0.5, sheenColor: new THREE.Color('#ffffff') }));
-    m.rotation.x = up ? -Math.PI / 2 : Math.PI / 2; m.position.y = up ? th + 0.0015 : -0.0015; if (!up) m.scale.x = -1;   // the back: seen from below, read the right way
+    m.rotation.x = up ? -Math.PI / 2 : Math.PI / 2; m.position.y = up ? th : 0; if (!up) m.scale.x = -1;   // the back: seen from below, read the right way
     m.receiveShadow = true; m.castShadow = true; return m;
   };
   g.add(face(front, true), face(back, false));
+  // the cut edge: the extrusion's walls only (its caps would sit a hair under the printed faces and flicker through
+  // them, in white stripes, at some distances)
   const edge = new THREE.ExtrudeGeometry(shape, { depth: th, bevelEnabled: false, curveSegments: 8 }); edge.rotateX(-Math.PI / 2);
-  g.add(new THREE.Mesh(edge, PBM.cardEdge));
+  edge.groups = edge.groups.filter((gr) => gr.materialIndex === 1).map((gr) => ({ ...gr, materialIndex: 0 }));
+  g.add(new THREE.Mesh(edge, [PBM.cardEdge]));
   return g;
 }
 // an outline in the plan (x, and z towards the front), corners rounded r, with a thumb notch (a half circle, radius
@@ -292,15 +295,19 @@ function embossPrint(img, w, h, maxAniso, pad = 0.08) {
   const PX = 520, W = Math.round((w + 2 * pad) * PX), H = Math.round((h + 2 * pad) * PX), P = pad * PX;
   const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c; };
   const ink = mk(), ix = ink.getContext('2d');
-  if (img) { ix.drawImage(img, P, P, W - 2 * P, H - 2 * P); ix.globalCompositeOperation = 'source-in'; ix.fillStyle = '#101114'; ix.fillRect(0, 0, W, H); }
+  if (img) { ix.drawImage(img, P, P, W - 2 * P, H - 2 * P); ix.globalCompositeOperation = 'source-in'; ix.fillStyle = '#3b3e45'; /* a dark grey ink, softer than black */ ix.fillRect(0, 0, W, H); }
   const white = mk(), wx = white.getContext('2d');
   wx.fillStyle = '#000'; wx.fillRect(0, 0, W, H);
   if (img) { const t = mk(), tx = t.getContext('2d'); tx.drawImage(img, P, P, W - 2 * P, H - 2 * P); tx.globalCompositeOperation = 'source-in'; tx.fillStyle = '#fff'; tx.fillRect(0, 0, W, H); wx.drawImage(t, 0, 0); }
   const soft = (src, blurPx) => { const c = mk(), x = c.getContext('2d'); x.filter = `blur(${blurPx}px)`; x.drawImage(src, 0, 0); return c; };
-  const height = soft(white, 0.014 * PX), around = soft(soft(white, 0.03 * PX), 0.03 * PX);
+  const height = soft(white, 0.009 * PX), around = soft(soft(white, 0.03 * PX), 0.03 * PX);
+  // the ink's surface: a fine, even stipple, as offset ink laid on coated board takes (a roughness map)
+  const grain = mk(), gx = grain.getContext('2d'), gd = gx.createImageData(W, H);
+  for (let i = 0; i < W * H; i++) { const v = 118 + Math.random() * 40; gd.data[i * 4] = gd.data[i * 4 + 1] = gd.data[i * 4 + 2] = v; gd.data[i * 4 + 3] = 255; }
+  gx.putImageData(gd, 0, 0); const grainS = soft(grain, 0.6);
   { const x = around.getContext('2d'), d = x.getImageData(0, 0, W, H); for (let i = 0; i < d.data.length; i += 4) { const v = Math.min(255, d.data[i] * 3); d.data[i] = d.data[i + 1] = d.data[i + 2] = v; } x.putImageData(d, 0, 0); }
   const tex = (c, srgb) => { const t = new THREE.CanvasTexture(c); if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = maxAniso; return t; };
-  return { ink: tex(ink, true), height: tex(height), around: tex(around), w: w + 2 * pad, h: h + 2 * pad };
+  return { ink: tex(ink, true), height: tex(height), around: tex(around), grain: tex(grainS), w: w + 2 * pad, h: h + 2 * pad };
 }
 function decalTexture(img, wcm, hcm, maxAniso) {
   const PX = 420;   // px per cm
@@ -404,8 +411,8 @@ export function createPadBoxMaterials(M, maxAniso = 8) {
   // the prints: embossed, the board raised under them in soft shoulders, a glossy black ink over the raised face
   const embossed = (E) => ({
     size: [E.w, E.h],
-    board: new THREE.MeshPhysicalMaterial({ ...boardOpts, bumpMap: E.height, bumpScale: 8, alphaMap: E.around, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
-    ink: new THREE.MeshPhysicalMaterial({ map: E.ink, transparent: true, roughness: 0.4, specularIntensity: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.1, bumpMap: E.height, bumpScale: 8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }),
+    board: new THREE.MeshPhysicalMaterial({ ...boardOpts, bumpMap: E.height, bumpScale: 7, alphaMap: E.around, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+    ink: new THREE.MeshPhysicalMaterial({ map: E.ink, transparent: true, roughness: 0.55, roughnessMap: E.grain, specularIntensity: 0.4, clearcoat: 0.45, clearcoatRoughness: 0.14, sheen: 0.15, sheenRoughness: 0.4, sheenColor: new THREE.Color('#8a8e98'), bumpMap: E.height, bumpScale: 7, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }),
   });
   const decal = (map) => new THREE.MeshPhysicalMaterial({ map, transparent: true, roughness: 0.4, clearcoat: 0.3, clearcoatRoughness: 0.25, bumpMap: bump, bumpScale: 0.2,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false });
@@ -431,19 +438,26 @@ export function createPadBoxMaterials(M, maxAniso = 8) {
   // the charger: glossy white polycarbonate (a smooth, bright reflection over a soft base); the pins' insulating
   // sleeves a satin white; nickel-plated pins and blades; the USB-C port's dark mouth and steel shell
   const plastic = new THREE.MeshPhysicalMaterial({ color: '#f6f6f3', roughness: 0.28, specularIntensity: 0.6, clearcoat: 0.6, clearcoatRoughness: 0.12 });
-  const sleeve = new THREE.MeshPhysicalMaterial({ color: '#f1f1ee', roughness: 0.55, specularIntensity: 0.4 });
+  const sleeve = new THREE.MeshPhysicalMaterial({ color: '#f0f0ed', roughness: 0.62, specularIntensity: 0.35 });
+  // the charger's shell: injection-moulded polycarbonate with a fine satin texture: soft, broad reflections (no mirror
+  // glare), a faint velvety sheen at grazing angles
+  const chargerBody = new THREE.MeshPhysicalMaterial({ color: '#f4f4f1', roughness: 0.4, specularIntensity: 0.5, clearcoat: 0.3, clearcoatRoughness: 0.28,
+    sheen: 0.22, sheenRoughness: 0.45, sheenColor: new THREE.Color('#ffffff'), bumpMap: bump, bumpScale: 0.015 });
+  const seam = new THREE.MeshStandardMaterial({ color: '#c9c9c5', roughness: 0.7 });   // the shell's parting line
   const portDark = new THREE.MeshStandardMaterial({ color: '#141416', roughness: 0.7, side: THREE.DoubleSide });
   const decalOpts = { polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 };
   const portHole = new THREE.MeshStandardMaterial({ color: '#0c0c0d', roughness: 0.85, ...decalOpts });           // the socket's opening
   const tongue = new THREE.MeshStandardMaterial({ color: '#2c2c2f', roughness: 0.5, metalness: 0.2, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });   // its tongue
   const slot = new THREE.MeshStandardMaterial({ color: '#050506', roughness: 0.9, side: THREE.DoubleSide });
   const pins = new THREE.MeshPhysicalMaterial({ color: '#d3d1cc', metalness: 1, roughness: 0.2 });
-  const blades = new THREE.MeshPhysicalMaterial({ color: '#cfc9bb', metalness: 1, roughness: 0.24 });
+  const pinMetal = new THREE.MeshPhysicalMaterial({ color: '#cbc8c1', metalness: 1, roughness: 0.32 });   // nickel-plated brass, finely brushed
+  const blades = new THREE.MeshPhysicalMaterial({ color: '#cbc5b7', metalness: 1, roughness: 0.32 });
+  const tie = new THREE.MeshPhysicalMaterial({ color: '#f6f6f4', roughness: 0.6, specularIntensity: 0.35, sheen: 0.25, sheenRoughness: 0.6, sheenColor: new THREE.Color('#ffffff'), side: THREE.DoubleSide });   // the cable's ties: soft matte plastic
   const rubber = new THREE.MeshPhysicalMaterial({ color: '#f4f4f2', roughness: 0.5, specularIntensity: 0.4, sheen: 0.35, sheenRoughness: 0.55, sheenColor: new THREE.Color('#ffffff') });   // the cable's soft TPE
   const cardEdge = new THREE.MeshStandardMaterial({ color: '#f4f3ef', roughness: 0.9 });   // the cards' cut edges
   const cards = {};
   for (const lang of ['en', 'pt']) cards[lang] = Object.fromEntries(['welcome-xx-front', 'welcome-xx-back', 'return-xx-front', 'return-xx-back'].map((k) => [k.replace('-xx-', '-'), cardFace(k, lang, maxAniso)]));
-  return { board, boardLid, inner, well, liner, linerLid, tray, plastic, sleeve, portDark, portHole, tongue, slot, pins, blades, rubber, cardEdge, cards, logo: logoPrint, symbol: symPrint, paper, screen, glass };
+  return { board, boardLid, inner, well, liner, linerLid, tray, plastic, sleeve, chargerBody, seam, pinMetal, portDark, portHole, tongue, slot, pins, blades, rubber, tie, cardEdge, cards, logo: logoPrint, symbol: symPrint, paper, screen, glass };
 }
 
 // ---------------------------------------------------------------- the model
@@ -605,29 +619,34 @@ function usbcSocket(PBM) {
   const tongue = new THREE.Mesh(new THREE.ShapeGeometry(rrShape(0.66, 0.07, 0.03), 8), PBM.tongue); tongue.position.z = 0.006; g.add(tongue);
   return g;
 }
-// the chargers, lying face up in the oval well, plug end towards the front, the USB-C port at the back:
-// EU: a soft rounded body, a narrower neck at the plug end, two round pins (type C: 4 mm, 19 mm apart, an insulated
-//     white sleeve then nickel-plated steel with a rounded tip)
-// US: a compact rounded cube, two flat nickel-plated blades (type A: 6.3 x 1.5 mm, 12.7 mm apart, a hole near the tip)
+// the chargers, lying face up in the oval well, plug end towards the front, the USB-C port at the back. As the kit's
+// charger: a tall body with flat faces and small rounded corners, a little narrower at the back (the port end) than at
+// the plug end; a step down to a narrower plug block; the pins (EU) or blades (US) out of its face
 function buildCharger(PBM, floor, kind) {
   const g = new THREE.Group(); g.name = 'pb-charger-' + kind;
-  const T = TRAY.well, cx = T.cx, H = 2.05, y = floor + H / 2;
+  const T = TRAY.well, cx = T.cx, eu = kind === 'eu', H = 2.05, y = floor + H / 2;
   const add = (geo, m, x, yy, z, setup) => { const o = new THREE.Mesh(geo, m); o.position.set(x, yy, z); if (setup) setup(o); g.add(o); return o; };
-  const W = kind === 'eu' ? 3.35 : 3.0, D = kind === 'eu' ? 3.9 : 3.1, cz = T.cz - (kind === 'eu' ? 0.45 : 0.1);
-  add(roundedBox(W, H, D, kind === 'eu' ? 0.62 : 0.55), PBM.plastic, cx, y, cz);
-  // the USB-C port at the back: a dark stadium mouth in a thin steel shell
-  const back = cz - D / 2;
+  const W = eu ? 3.55 : 3.1, D = eu ? 3.75 : 3.0, R = 0.34, back = T.cz - (eu ? 2.6 : 2.1), cz = back + D / 2;
+  const taper = (geo, d) => { const P = geo.attributes.position; for (let i = 0; i < P.count; i++) { const t = (P.getZ(i) + d / 2) / d; P.setX(i, P.getX(i) * (0.9 + 0.1 * t)); } geo.computeVertexNormals(); return geo; };
+  add(taper(roundedBox(W, H, D, R, 36), D), PBM.chargerBody, cx, y, cz);
+  // the parting line round its sides, a little below the middle
+  const seamG = slab(rrShape(W + 0.006, D + 0.006, R + 0.003), -0.011, 0.011, 0); seamG.translate(0, 0, 0);
+  add(taper(seamG, D + 0.006), PBM.seam, cx, floor + H * 0.36, cz);
+  // the USB-C port at the back
   const sock = usbcSocket(PBM); sock.rotation.y = Math.PI; sock.position.set(cx, y, back - 0.001); g.add(sock);
-  if (kind === 'eu') {
-    const neck = add(roundedBox(2.6, 1.72, 0.9, 0.38), PBM.plastic, cx, y, cz + D / 2 + 0.25);
-    const face = neck.position.z + 0.45;
-    for (const sx of [-0.95, 0.95]) {
-      add(new THREE.CylinderGeometry(0.2, 0.2, 1.0, 32), PBM.sleeve, cx + sx, y, face + 0.5, (o) => { o.rotation.x = Math.PI / 2; });
-      add(new THREE.CylinderGeometry(0.2, 0.2, 0.85, 32), PBM.pins, cx + sx, y, face + 1.42, (o) => { o.rotation.x = Math.PI / 2; });
-      add(new THREE.SphereGeometry(0.2, 32, 16), PBM.pins, cx + sx, y, face + 1.85, (o) => { o.scale.set(1, 1, 0.75); });
-    }
+  // a pin along +z from the face: a white insulating sleeve, then the nickel-plated pin with its rounded end
+  const pinGeo = (r, sleeveL, metalL) => {
+    const sl = new THREE.CylinderGeometry(r + 0.004, r + 0.004, sleeveL, 48); sl.rotateX(Math.PI / 2); sl.translate(0, 0, sleeveL / 2);
+    const shaft = new THREE.CylinderGeometry(r, r, metalL - r, 48, 1, true); shaft.rotateX(Math.PI / 2); shaft.translate(0, 0, sleeveL + (metalL - r) / 2);
+    const tip = new THREE.SphereGeometry(r, 48, 24, 0, Math.PI * 2, 0, Math.PI / 2); tip.rotateX(Math.PI / 2); tip.translate(0, 0, sleeveL + metalL - r);
+    return [sl, shaft, tip];
+  };
+  const bw = eu ? 3.0 : 2.6, bh = H - 0.22, bl = eu ? 1.45 : 0.5;
+  add(roundedBox(bw, bh, bl + 0.4, 0.3, 30), PBM.chargerBody, cx, y, cz + D / 2 + (bl + 0.4) / 2 - 0.4);
+  const face = cz + D / 2 + bl;
+  if (eu) {
+    for (const sx of [-0.84, 0.84]) { const [sl, shaft, tip] = pinGeo(0.2, 1.05, 0.85); add(sl, PBM.sleeve, cx + sx, y, face - 0.02); add(shaft, PBM.pinMetal, cx + sx, y, face - 0.02); add(tip, PBM.pinMetal, cx + sx, y, face - 0.02); }
   } else {
-    const face = cz + D / 2;
     for (const sx of [-0.635, 0.635]) {
       add(roundedBox(0.15, 0.63, 1.6, 0.05, 12), PBM.blades, cx + sx, y, face + 0.75);
       for (const side of [-1, 1]) add(new THREE.CircleGeometry(0.15, 24), PBM.portDark, cx + sx + side * 0.077, y, face + 1.2, (o) => { o.rotation.y = side * Math.PI / 2; });
@@ -636,37 +655,79 @@ function buildCharger(PBM, floor, kind) {
   g.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
   return g;
 }
-// the white USB-C cable coiled twice round the well, held by a clip on each side, its lead running across the top
-// of the well to the angled USB-C plug lying there
+// the white USB-C cable, as in the kit's photo: one cable spiralling round the well about two and a half times, from
+// its outer turn inwards, its two ends in view: one USB-C plug resting on the coil at the bottom right, where the
+// spiral starts; the other off the inner turn at the top, lying diagonally towards the top left of the charger. A tie
+// on each side, level with the charger, holds the strands together
 function buildCable(PBM, floor) {
   const g = new THREE.Group(); g.name = 'pb-cable';
-  const T = TRAY.well, cx = T.cx, tube = 0.15;
-  const at = (inset, t) => {   // a point round the stadium inset from the wall (t: 0..1, from the back left)
+  const T = TRAY.well, cx = T.cx, tube = 0.13, yF = floor + tube + 0.006;
+  // a point round the stadium, inset from the wall (t: 0..1, from the start of the back curve, clockwise from above)
+  const at = (inset, t) => {
+    t = ((t % 1) + 1) % 1;
     const w = T.w - 2 * inset, l = T.l - 2 * inset, r = w / 2, h = l / 2 - r, per = 2 * Math.PI * r + 4 * h, sArc = t * per;
-    if (sArc < Math.PI * r) { const a = Math.PI + sArc / r; return [r * Math.cos(a), -h + r * Math.sin(a)]; }
-    if (sArc < Math.PI * r + 2 * h) return [r, -h + (sArc - Math.PI * r)];
-    if (sArc < 2 * Math.PI * r + 2 * h) { const a = (sArc - Math.PI * r - 2 * h) / r; return [r * Math.cos(a), h + r * Math.sin(a)]; }
-    return [-r, h - (sArc - 2 * Math.PI * r - 2 * h)];
+    if (sArc < Math.PI * r) { const a = Math.PI + sArc / r; return [cx + r * Math.cos(a), T.cz - h + r * Math.sin(a)]; }
+    if (sArc < Math.PI * r + 2 * h) return [cx + r, T.cz - h + (sArc - Math.PI * r)];
+    if (sArc < 2 * Math.PI * r + 2 * h) { const a = (sArc - Math.PI * r - 2 * h) / r; return [cx + r * Math.cos(a), T.cz + h + r * Math.sin(a)]; }
+    return [cx - r, T.cz + h - (sArc - 2 * Math.PI * r - 2 * h)];
   };
-  const tubeMesh = (pts, closed) => g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, closed, 'catmullrom', 0.5), closed ? 320 : 120, tube, 16, closed), PBM.rubber));
-  [[0.3, 0], [0.62, 1]].forEach(([inset, k]) => {
-    const pts = [];
-    for (let i = 0; i < 80; i++) { const t = i / 80, [px, pz] = at(inset, t); pts.push(new THREE.Vector3(cx + px, floor + tube + 0.01 + (k ? 0.02 * Math.sin(t * Math.PI * 6) + 0.03 : 0), T.cz + pz)); }
-    tubeMesh(pts, true);
-  });
-  // the lead: off the inner loop at the back left, curving in to the plug, which lies flat on the well's floor across
-  // the space between the coil's back curve and the charger, its tip towards the right
-  const top = T.cz - T.l / 2, pz = top + 2.55, yF = floor + tube + 0.01;
-  const [lx, lz] = at(0.62, 0.93);
-  const lead = [[cx + lx, T.cz + lz], [cx - 2.05, pz + 0.55], [cx - 1.85, pz + 0.1], [cx - 1.55, pz]].map(([x, z]) => new THREE.Vector3(x, yF, z));
-  tubeMesh(lead, false);
-  // the plug: a tapered strain relief, the moulded head, the steel USB-C shell, all along +x
-  const end = lead[3], dir = new THREE.Vector3(1, 0, 0), ang = Math.PI / 2, yP = floor + 0.3;
-  const relief = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.152, 0.6, 32, 4), PBM.rubber); relief.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); relief.position.set(end.x + 0.3, floor + tube + 0.03, pz); g.add(relief);   // tapering from the head into the cable
-  const head = new THREE.Mesh(roundedBox(1.0, 0.58, 1.5, 0.26, 20), PBM.plastic); head.rotation.y = ang; head.position.set(end.x + 0.6 + 0.75, yP, pz); g.add(head);
-  const plug = usbcPlug(PBM); plug.rotation.y = ang; plug.position.set(end.x + 0.6 + 1.5, yP, pz); g.add(plug);
-  // the clips: soft flat bands round the two strands on each side
-  for (const sx of [-1, 1]) { const c = new THREE.Mesh(roundedBox(1.08, 0.48, 0.4, 0.17, 14), PBM.plastic); c.position.set(cx + sx * (T.w / 2 - 0.46), floor + 0.24, T.cz - 0.9); g.add(c); }
+  const tAt = (inset, which) => {   // the t of the bottom right (a little round the front curve) and of the top middle
+    const w = T.w - 2 * inset, l = T.l - 2 * inset, r = w / 2, h = l / 2 - r, per = 2 * Math.PI * r + 4 * h;
+    return which === 'B' ? (Math.PI * r + 2 * h + 0.55 * r) / per : (0.5 * Math.PI * r) / per;
+  };
+  const I0 = 0.2, I1 = 0.9, tB = tAt(I0, 'B'), tTop = tAt(I1, 'top'), uEnd = (tB - tTop) + 2;   // the spiral's length in turns
+  const insetAt = (u) => I0 + (I1 - I0) * (u / uEnd);
+  const pts = [];
+  for (let k = 0; k <= 420; k++) { const u = (k / 420) * uEnd, [x, z] = at(insetAt(u), tB - u); pts.push(new THREE.Vector3(x, yF, z)); }
+  // end A: off the inner turn at the top middle, curving down to the left, into the plug lying diagonally
+  const dirA = new THREE.Vector3(-0.6, 0, 0.8).normalize(), a0 = pts[pts.length - 1];
+  const reliefA = new THREE.Vector3(a0.x - 0.55, yF, a0.z + 0.35);
+  const lead = [a0, new THREE.Vector3(a0.x - 0.3, yF, a0.z + 0.06), new THREE.Vector3(a0.x - 0.5, yF, a0.z + 0.2), reliefA];
+  // end B: the start of the spiral leaves the coil in a smooth S, up onto the strands, into the plug resting on them
+  const [bx0, bz0] = at(I0, tB), [bx1, bz1] = at(I0, tB + 0.012), tb = new THREE.Vector3(bx1 - bx0, 0, bz1 - bz0).normalize(), dirB = tb.clone();
+  const OFF = 1.0;   // the plug starts this far on from where the spiral begins
+  const inside = (x, z, d) => { const h0 = T.l / 2 - T.w / 2, dz = Math.max(0, Math.abs(z - T.cz) - h0); return Math.hypot(x - cx, dz) <= T.w / 2 - d; };
+  const fits = (d) => { const side = new THREE.Vector3(-d.z, 0, d.x); return [OFF, OFF + 1.0, OFF + 2.45].every((L) => [-0.42, 0.42].every((w) => inside(bx0 + d.x * L + side.x * w, bz0 + d.z * L + side.z * w, 0.15))); };
+  turn: for (let k = 0; k <= 40; k++) for (const sg of [1, -1]) {   // turned in from the curve just enough to stay inside the well
+    const a = sg * k * 3 * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a), d = new THREE.Vector3(tb.x * c - tb.z * sn, 0, tb.x * sn + tb.z * c);
+    if (fits(d)) { dirB.copy(d); break turn; }
+  }
+  const yOn = floor + 2 * tube + 0.29;   // the plug's middle, resting on top of the strands
+  const P0 = pts[0], reliefB = new THREE.Vector3(bx0 + dirB.x * OFF, yOn, bz0 + dirB.z * OFF);
+  const c1 = reliefB.clone().addScaledVector(dirB, -0.45), c2 = new THREE.Vector3(P0.x + tb.x * 0.4, yF, P0.z + tb.z * 0.4), bez = [];
+  for (let k = 0; k < 14; k++) { const t = k / 14, u = 1 - t; bez.push(new THREE.Vector3().addScaledVector(reliefB, u * u * u).addScaledVector(c1, 3 * u * u * t).addScaledVector(c2, 3 * u * t * t).addScaledVector(P0, t * t * t)); }
+  // end A: the plug's moulded end on the floor, tilted so its far end rests on the strands where it reaches them
+  const near = (x, z) => { let m = Infinity; for (let k = 0; k < pts.length; k += 2) m = Math.min(m, Math.hypot(pts[k].x - x, pts[k].z - z)); return m; };
+  let Lc = null;
+  { const side = new THREE.Vector3(-dirA.z, 0, dirA.x);
+    for (let L = 0.3; L <= 2.66 && Lc === null; L += 0.08) for (const w of [-0.42, 0, 0.42]) if (near(reliefA.x + dirA.x * L + side.x * w, reliefA.z + dirA.z * L + side.z * w) < tube + 0.03) { Lc = L; break; } }
+  const pitch = Lc === null ? 0 : Math.min(0.42, Math.atan(0.3 / Math.max(0.5, Lc - 0.1)));
+  const dirA3 = new THREE.Vector3(dirA.x * Math.cos(pitch), Math.sin(pitch), dirA.z * Math.cos(pitch));
+  const all = [...bez, ...pts, ...lead.slice(1)];
+  const curve = new THREE.CatmullRomCurve3(all, false, 'catmullrom', 0.5);
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 1600, tube, 16, false), PBM.rubber));
+  // the plugs: a tapered strain relief, the moulded head, the steel USB-C shell, along dir (3D) from the cable's end
+  const plug = (end, dir, y) => {
+    const o = new THREE.Vector3(end.x, y, end.z), qz = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+    const relief = new THREE.Mesh(new THREE.CylinderGeometry(0.2, tube + 0.002, 0.6, 32, 4), PBM.rubber); relief.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); relief.position.copy(o).addScaledVector(dir, 0.3); g.add(relief);
+    const head = new THREE.Mesh(roundedBox(0.78, 0.56, 1.4, 0.24, 20), PBM.plastic); head.quaternion.copy(qz); head.position.copy(o).addScaledVector(dir, 1.3); g.add(head);
+    const shell = usbcPlug(PBM); shell.quaternion.copy(qz); shell.position.copy(o).addScaledVector(dir, 2.0); g.add(shell);
+  };
+  plug(reliefA, dirA3, yF);
+  plug(reliefB, dirB, yOn);
+  // the ties: thin flat bands of soft white plastic wrapped snugly round the strands on each side, level with the
+  // charger, each sized to the strands it holds
+  const T2 = 0.035, zt = T.cz - 0.55;
+  for (const side of [-1, 1]) {
+    const xs = [];
+    for (let k = 0; k <= 8000; k++) { const u = (k / 8000) * uEnd, [x, z] = at(insetAt(u), tB - u); if (Math.abs(z - zt) < 0.03 && Math.sign(x - cx) === side) xs.push(x); }
+    if (!xs.length) continue;
+    const x0 = Math.min(...xs) - tube - 0.01, x1 = Math.max(...xs) + tube + 0.01, iw = Math.max(0.36, x1 - x0), ih = 2 * tube + 0.03;
+    const wrap = rrShape(iw + 2 * T2, ih + 2 * T2, tube + T2 + 0.01); wrap.holes.push(rrShape(iw, ih, tube + 0.01, THREE.Path));
+    const band = new THREE.ExtrudeGeometry(wrap, { depth: 0.55, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.01, bevelOffset: -0.01, bevelSegments: 3, curveSegments: 16 });
+    band.translate(0, 0, -0.275);
+    const m = new THREE.Mesh(band, PBM.tie); m.position.set((x0 + x1) / 2, yF + 0.012, zt); g.add(m);
+  }
   g.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
   return g;
 }
