@@ -57,7 +57,7 @@ const MAX_FRAMES = 60 * 30;               // a video never has more frames than 
 export function initVideo(ctx) {
   const { THREE, $, camera, controls, renderer, state } = ctx;
   const sec = $('#video-section');
-  const v = { motion: 'turntable', angle: 360, dir: 1, dur: 8, size: 1920, gifSize: 1280, matte: '#ffffff', gifShadow: 1, fps: '29.97', smooth: 2, lastPreset: 'turntable', format: 'mp4', transparent: false };
+  const v = { motion: 'turntable', angle: 360, dir: 1, dur: 8, size: 1920, gifSize: 1280, matte: '#ffffff', fps: '29.97', smooth: 2, lastPreset: 'turntable', format: 'mp4', transparent: false };
   const angleMem = {};                    // each movement keeps its own angle
   let take = null;                        // the recording: [{t, p:[x,y,z], q:[x,y,z], f}]
   let rec = null;                         // recording now: { t0, samples }
@@ -254,8 +254,8 @@ export function initVideo(ctx) {
         : v.format === 'mov' ? movWriter(W, H, rate(), alpha)
         : v.format === 'png' ? zipWriter(subject)
         : gifWriter(W, H, gifDelay(), hexRGB(alpha ? v.matte : ctx.state.bg), alpha);
-      // a transparent GIF without its shadow: the floor shadow left out of the frames
-      if (v.format === 'gif' && alpha && !v.gifShadow) shadowWas = ctx.setShadow(false);
+      // a transparent GIF has no floor shadow (a GIF can't hold its soft see-through tones): left out of the frames
+      if (v.format === 'gif' && alpha) shadowWas = ctx.setShadow(false);
       prev = ctx.beginFrames(W, H);
       const out = document.createElement('canvas'); out.width = W; out.height = H;
       const octx = out.getContext('2d', { alpha, willReadFrequently: v.format === 'gif' });
@@ -344,13 +344,12 @@ export function initVideo(ctx) {
     tr.checked = v.transparent; tr.disabled = !fmt.alpha;
     $('#vid-transparent-row').classList.toggle('disabled', !fmt.alpha);
     $('#vid-transparent-sub').textContent = fmt.alpha ? '' : `not with ${fmt.label}`;
-    $('#vid-format-note').textContent = fmt.note + (v.format === 'gif' && alphaOn() ? ' Transparent: set the colour of the slide it goes on, and its edges and soft shadow blend into it cleanly (GIF pixels can only be solid or see-through).' : '');
+    $('#vid-format-note').textContent = fmt.note + (v.format === 'gif' && alphaOn() ? ' Transparent: set the colour of the slide it goes on, and its edges blend into it cleanly. Transparent GIFs have no shadow (GIF pixels can only be solid or see-through).' : '');
     const gifA = v.format === 'gif' && alphaOn();
     $('#vid-matte-row').classList.toggle('hidden', !gifA);
-    $('#vid-gifshadow-row').classList.toggle('hidden', !gifA);
     $('#vid-matte').value = v.matte;
     document.querySelectorAll('[data-matte]').forEach((b) => b.classList.toggle('on', b.dataset.matte === v.matte));
-    document.querySelectorAll('[data-vseg="gifShadow"] button').forEach((b) => b.classList.toggle('on', +b.dataset.value === v.gifShadow));
+
     const [W, H] = videoSize(), L = length();
     const fpsText = v.format === 'gif' ? `${Math.round(1000 / gifDelay())} fps` : `${v.fps} fps`;
     $('#vid-info').innerHTML = `<span class="num">${W} × ${H}<small>px</small></span>${fmt.label === 'PNG seq.' ? 'PNG sequence' : fmt.label} · ${fpsText}${L ? ` · ${L.toFixed(1)} s` : ''}${alphaOn() ? ' · transparent' : ''}`;
