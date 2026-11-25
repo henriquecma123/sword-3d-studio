@@ -426,3 +426,43 @@ select {
 .devices button.on .d-gl-strip { fill: #1f62d6; }
 /* its custom reading: three fields */
 .gl-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* ---------- video ---------- */
+#busy-cancel { font: 500 13px var(--sans, inherit); padding: 7px 16px; border-radius: 999px; border: 1px solid var(--grey-300); background: #fff; color: var(--grey-800); cursor: pointer; }
+#busy-cancel:hover { border-color: var(--grey-500, #888); }
+/* Preview: beside Download video, a lighter button of the same height */
+.preview-btn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 44px; padding: 0 14px;
+  border: 1px solid var(--grey-300); border-radius: 999px; background: #fff; color: var(--grey-800); font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.preview-btn:hover { border-color: var(--grey-500, #888); }
+.preview-btn:disabled { opacity: .45; cursor: default; }
+/* the video row: its details on one line, then Preview and Download video side by side, right-aligned under Download image */
+#vid-export-row { flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+#vid-export-row .export-info { flex: 1 0 100%; }
+#vid-export-row .export-info .num { display: inline; font-size: 16px; margin-right: 8px; }
+/* the footer: a row for the image, and under it one for the video, alike */
+.export-bar { flex-direction: column; align-items: stretch; gap: 10px; }
+.export-row { display: flex; align-items: center; gap: 14px; }
+.export-row .primary { min-width: 178px; justify-content: center; }
+#vid-export-row { padding-top: 10px; border-top: 1px solid var(--grey-200); }
+.ghost.dark { background: var(--grey-800); border-color: var(--grey-800); color: #fff; }
+.ghost.dark:hover { background: var(--grey-900); }
+.ghost:disabled { opacity: .45; cursor: default; }
+.rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; margin-right: 6px; vertical-align: 1px; }
+#video-section.recording #vid-rec { background: #e5484d; border-color: #e5484d; color: #fff; }
+#video-section.recording #vid-rec .rec-dot { background: #fff; animation: rec-blink 1s steps(2) infinite; }
+.vid-rec { margin-top: 12px; }
+#rec-badge {
+  position: absolute; z-index: 3; top: 16px; right: 16px; display: none; align-items: center; padding: 6px 12px; border-radius: 999px;
+  background: rgba(255, 255, 255, .85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: var(--shadow-sm);
+  font-size: 12px; font-weight: 600; color: #e5484d; pointer-events: none; font-variant-numeric: tabular-nums;
+}
+#rec-badge.show { display: inline-flex; }
+#rec-badge .rec-dot { animation: rec-blink 1s steps(2) infinite; }
+#rec-badge #vid-rec-time { margin-left: 4px; color: var(--grey-800); font-weight: 500; }
+@keyframes rec-blink { 50% { opacity: .25; } }
+#vid-take-info:empty, #vid-note:empty { display: none; }
+#vid-matte-row .swatches { display: flex; align-items: center; gap: 6px; }
+#vid-matte-row .swatches button { width: 22px; height: 22px; }
+#vid-matte-row .color-pick { width: 22px; height: 22px; }

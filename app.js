@@ -130,6 +130,8 @@ controls.zoomSpeed = 0.8;
 // Space held: a left-drag in the view pans the camera (slides it across and up or down, keeping its angle), as in
 // design tools. (Not while typing in a field)
 let spaceDown = false;
+let video = null;        // the Video section (video.js), once the studio has loaded
+let videoHold = false;   // a video rendering: the loop stands still
 const typingInField = () => { const a = document.activeElement; return !!a && ((a.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(a.type)) || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable); };
 function setSpace(on) {
   spaceDown = on;
@@ -1220,10 +1222,12 @@ function updateSelOutline() {
 let padCheck = 0;
 function loop() {
   requestAnimationFrame(loop);
+  if (videoHold) return;
   // the lighting pad's device icon follows the model (a device loading late, the bands settling): checked twice a second
   if (++padCheck % 30 === 0 && padIconKey !== padIconKeyNow()) drawLightPad();
   const moved = controls.update();
   if (moved) { syncCameraUI(); dirty = true; }
+  if (video) { try { video.tick(); } catch (err) { console.error(err); } }   // a video's preview or a recording
   const moving = bandsIn() && bandsRig.step();
   if (moving) { markShadowDirty(); resetShadow(); }
   if (state.shadow) {
@@ -1600,6 +1604,7 @@ for (const k of ['sys', 'dia', 'pulse', 'time']) document.getElementById('bp-' +
 { const inp = document.getElementById('scale-reading');
   inp.addEventListener('input', () => { state.scaleReading = inp.value.replace(/[^0-9.,\- ]/g, '').slice(0, 7); setScaleReading(SCM, state.scaleReading); requestRender(); }); }
 function syncSetupUI() {
+  video?.setAvailable(true);   // videos: every device, and combined shots
   const ph = isPhone();
   $('#stand-row').classList.toggle('hidden', !isPad());
   $('#pose-row').classList.toggle('hidden', isPadBox() || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || isGluco() || (isPad() && state.stand));
@@ -2260,6 +2265,7 @@ function updateExportInfo() {
   const [w, h] = exportSize();
   const extra = state.format === 'png' && state.transparent ? ' · transparent' : '';
   $('#export-info').innerHTML = `<span class="num">${w} × ${h}<small>px</small></span>${state.format.toUpperCase()}${extra}`;
+  video?.refresh();
 }
 $('#resolution').addEventListener('change', (e) => { state.resolution = +e.target.value; updateExportInfo(); });
 function limitResolutions() {
@@ -2316,6 +2322,10 @@ async function renderToCanvas(W, H, transparent, onProgress) {
   return out;
 }
 
+function shotSubject() {
+  return comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isPadBox() ? `sword-pad-box_${state.pb.lid === 'off' ? 'no-lid' : state.pb.lid}_${state.pb.pad ? 'pad' : 'empty'}${state.pb.paper && state.pb.lid !== 'closed' ? '_paper' : ''}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}${state.scaleTilt ? `_tilt-${Math.round(state.scaleTilt)}` : ''}` : isBloom() ? `pelvic-health-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-band-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `sword-pad_${state.stand ? 'stand' : state.pose}`;
+}
+
 async function exportImage() {
   const btn = $('#download');
   btn.disabled = true;
@@ -2330,7 +2340,7 @@ async function exportImage() {
     const type = state.format === 'png' ? 'image/png' : 'image/jpeg';
     const blob = await new Promise((r) => out.toBlob(r, type, 0.95));
     const { az, el } = getCamAngles();
-    const subject = comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isPadBox() ? `sword-pad-box_${state.pb.lid === 'off' ? 'no-lid' : state.pb.lid}_${state.pb.pad ? 'pad' : 'empty'}${state.pb.paper && state.pb.lid !== 'closed' ? '_paper' : ''}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}${state.scaleTilt ? `_tilt-${Math.round(state.scaleTilt)}` : ''}` : isBloom() ? `pelvic-health-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-band-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `sword-pad_${state.stand ? 'stand' : state.pose}`;
+    const subject = shotSubject();
     const name = `${subject}_az${Math.round(az)}_el${Math.round(el)}_${W}x${H}.${state.format}`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -2347,9 +2357,69 @@ async function exportImage() {
   }
 }
 $('#download').addEventListener('click', exportImage);
+
+// ---------------------------------------------------------------- video (video.js)
+// frames for a video: the renderer set once to the video's size (up to twice over, for smooth edges), the floor
+// shadow finished first (it doesn't change as the camera moves)
+function beginVideoFrames(W, H) {
+  const prev = { pr: renderer.getPixelRatio(), size: renderer.getSize(new THREE.Vector2()), pins: bandsRig.helpers.visible };
+  bandsRig.helpers.visible = false; bandsRig.exportMode(true);
+  if (state.shadow) while (accumulate(64)) { /* converge */ }
+  const maxSide = Math.min(4096, renderer.capabilities.maxTextureSize);
+  const ss = Math.max(1, Math.min(2, maxSide / Math.max(W, H)));
+  prev.rw = Math.round(W * ss); prev.rh = Math.round(H * ss);
+  renderer.setPixelRatio(1);
+  renderer.setSize(prev.rw, prev.rh, false);
+  camera.aspect = W / H; camera.updateProjectionMatrix();
+  videoFrames = prev;
+  return prev;
+}
+let videoFrames = null;
+function renderVideoFrame(octx, W, H, transparent) {
+  camera.updateProjectionMatrix();
+  renderMain();
+  if (transparent) octx.clearRect(0, 0, W, H); else { octx.fillStyle = state.bg; octx.fillRect(0, 0, W, H); }
+  octx.drawImage(renderer.domElement, 0, 0, videoFrames.rw, videoFrames.rh, 0, 0, W, H);
+}
+function endVideoFrames(prev) {
+  videoFrames = null;
+  bandsRig.helpers.visible = prev.pins; bandsRig.exportMode(false);
+  renderer.setPixelRatio(prev.pr);
+  renderer.setSize(prev.size.x, prev.size.y);
+  resize();
+}
+function showBusy(text, onCancel) {
+  $('#busy-text').textContent = text;
+  const c = $('#busy-cancel');
+  c.classList.toggle('hidden', !onCancel);
+  c.onclick = onCancel ? () => { c.disabled = true; $('#busy-text').textContent = 'Stopping…'; onCancel(); } : null;
+  c.disabled = false;
+  $('#busy').classList.add('show');
+}
+function hideBusy() {
+  $('#busy').classList.remove('show'); $('#busy-cancel').classList.add('hidden');
+  $('#busy-text').textContent = 'Rendering…';
+  requestRender();
+}
 if (new URLSearchParams(location.search).has('debug')) window.__studio = { padbox, PBX, framePadBox, renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
 
 // ---------------------------------------------------------------- init
+// (loaded on its own: if anything in it fails, the studio carries on without the Video section)
+try {
+  const { initVideo } = await import('./video.js');
+  video = initVideo({
+    THREE, $, camera, controls, renderer, state, paintRange,
+    aspect: aspectValue,
+    pivot: () => modelBounds().getCenter(new THREE.Vector3()),
+    cameraMoved: () => { syncCameraUI(); markView(null); requestRender(); },
+    setRecording: (on) => $('#rec-badge').classList.toggle('show', on),
+    hold: (on) => { videoHold = on; if (!on) requestRender(); },
+    showBusy, hideBusy, busyText: (t) => { $('#busy-text').textContent = t; },
+    beginFrames: beginVideoFrames, renderFrame: renderVideoFrame, endFrames: endVideoFrames,
+    subject: shotSubject,
+    setShadow: (on) => { const was = state.shadow; state.shadow = on; requestRender(); return was; },
+  });
+} catch (err) { console.error('Video unavailable', err); video = null; $('#video-section')?.classList.add('hidden'); }
 if (IS_TOUCH) $('.hint').textContent = 'Drag to rotate · Pinch to zoom · Two-finger drag to pan';
 applyReflect(state.screenReflect);
 phoenixTexts();
