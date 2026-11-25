@@ -11,6 +11,7 @@ import { createBloomMaterials, buildBloom, setBloomFloor, setBloomLight } from '
 import { createScaleMaterials, buildScale, setScaleReading } from './scale.js';
 import { BP_PRESETS, createBPMaterials, buildBPMonitor, poseBPMonitor, setBPReading, visibleBox } from './bpmonitor.js';
 import { GL_PRESETS, createGlucoMaterials, buildGlucometer, poseGlucometer, setGlucoReading } from './glucometer.js';
+import { PADBOX_DEFAULTS, createPadBoxMaterials, buildPadBox, posePadBox } from './padbox.js';
 import { studioLight, installCameraCurve } from './bands-light.js';
 import { PAD_SCREENS, PHONE_SCREENS, EXERCISES, VERSION } from './screens.js';
 import { drawScoreBar, drawPill, PILL_MAX, scoreBarFonts } from './scorebar.js';
@@ -52,6 +53,7 @@ const state = {
   mbandPose: 'worn',          // M-Band: worn (closed in a loop) | flat (lying flat) | sensor (turned over, sensors up)
   bpCuff: true,               // its cuff and tube (standing: the cuff upright behind it; lying: the cuff on its side)
   bpPose: 'standing',         // the blood pressure monitor: standing (leaning back a little) | lying (face up)
+  pb: { ...PADBOX_DEFAULTS },   // the Sword Pad Box: lid (closed | open | off) and where it is, the pad in or out (and its tilt), the tracing paper, the pad's screen
   glPose: 'upright',          // the glucometer: upright (leaning back a little) | lying (face up)
   glStrip: true,              // its test strip in the slot
   glLean: 10,                 // upright: how far it leans back (degrees; negative leans forward)
@@ -170,12 +172,14 @@ const GLM = createGlucoMaterials(maxAniso);   // the glucometer: built in code f
 markGlass(M.glass, M.screen, P.screen, SCM.top, SCM.edge, BPM.face, GLM.face);   // the screens and glass faces
 const gluco = buildGlucometer(GLM);
 GLM.onChange = () => requestRender();
+const PBX = createPadBoxMaterials(M, maxAniso);   // the Sword Pad Box: built in code from its Figma renders (padbox.js)
+const padbox = buildPadBox(PBX, M, buildTablet);
 const model = new THREE.Group();
 // the resistance bands: simulated (bands.js); their pin handles show on screen only
 const bandsRig = new BandsRig(maxAniso);
 await bandsRig.init();
 bandsRig.camera = camera;   // prints are turned to the camera once a preset settles
-model.add(tablet, stand, phone, box, mband, block, bloom, scale, bp, gluco, bandsRig.group);
+model.add(tablet, stand, phone, box, mband, block, bloom, scale, bp, gluco, padbox, bandsRig.group);
 scene.add(model, bandsRig.helpers);
 const isPhone = () => state.device === 'iphone';
 const isPad = () => state.device === 'pad';
@@ -186,6 +190,9 @@ const isBloom = () => state.device === 'bloom';
 const isScale = () => state.device === 'scale';
 const isBP = () => state.device === 'bp';
 const isGluco = () => state.device === 'gluco';
+const isPadBox = () => state.device === 'padbox';
+// the Pad Box's pad shows the Sword Pad's screen: its screen controls are the Sword Pad's
+const scrDev = () => (state.device === 'padbox' ? 'pad' : state.device);
 const isBands = () => state.device === 'bands';
 // the hooks can be shown in the image only for the shapes that hang on them (Hanging, Stretched); the tick is kept
 // for when one is picked again
@@ -260,6 +267,12 @@ function poseMBandStudio() {
   mband.position.set(-c.x, -b.min.y + 0.001, -c.z);
 }
 
+// the Sword Pad Box: on the floor, its lid, pad and paper as set
+function posePadBoxStudio() {
+  padbox.position.set(0, 0, 0);
+  posePadBox(padbox, state.pb);
+}
+
 // the glucometer: upright or lying, on the floor
 function poseGlucoStudio() {
   poseGlucometer(gluco, state.glPose, state.glStrip, state.glLean);
@@ -331,17 +344,17 @@ function posePad() {
 // dropped last, so it lands on top); one moved into another is pushed out sideways. Take one from under another and
 // that one falls. The bands are simulated: the devices are obstacles in their simulation, so they drape over them.
 // Only the placements are worked out as you drag (no re-posing), so a drag stays light.
-const COMBO_ORDER = ['pad', 'iphone', 'box', 'bands', 'block', 'bloom', 'mband', 'scale', 'bp', 'gluco'];   // the device grid's order
-const COMBO_NAMES = { pad: 'Thrive Pad', iphone: 'Vision AI', bloom: 'Sword pod', box: 'Box', bands: 'Bands', block: 'Yoga block', mband: 'M-Band', scale: 'Scale', bp: 'BP monitor', gluco: 'Glucometer' };
+const COMBO_ORDER = ['pad', 'padbox', 'iphone', 'box', 'bands', 'block', 'bloom', 'mband', 'scale', 'bp', 'gluco'];   // the device grid's order
+const COMBO_NAMES = { pad: 'Sword Pad', padbox: 'Sword Pad Box', iphone: 'Vision AI', bloom: 'Pelvic Health Pod', box: 'Box', bands: 'Bands', block: 'Yoga block', mband: 'Sword Band', scale: 'Scale', bp: 'BP monitor', gluco: 'Glucometer' };
 const comboOn = () => state.comboOn && state.combo.some((d) => d !== state.device);
 const members = () => (comboOn() ? COMBO_ORDER.filter((d) => d === state.device || state.combo.includes(d)) : [state.device]);
 const bandsIn = () => members().includes('bands');
-const GROUP_OF = { pad: () => [tablet, stand], iphone: () => [phone], box: () => [box], bands: () => [], mband: () => [mband], block: () => [block], bloom: () => [bloom], scale: () => [scale], bp: () => [bp], gluco: () => [gluco] };
-const POSER = { pad: posePad, iphone: posePhone, box: () => poseBox(true), bands: () => {}, mband: poseMBandStudio, block: poseBlockStudio, bloom: poseBloomStudio, scale: poseScaleStudio, bp: poseBPStudio, gluco: poseGlucoStudio };
+const GROUP_OF = { pad: () => [tablet, stand], iphone: () => [phone], box: () => [box], bands: () => [], mband: () => [mband], block: () => [block], bloom: () => [bloom], scale: () => [scale], bp: () => [bp], gluco: () => [gluco], padbox: () => [padbox] };
+const POSER = { pad: posePad, iphone: posePhone, box: () => poseBox(true), bands: () => {}, mband: poseMBandStudio, block: poseBlockStudio, bloom: poseBloomStudio, scale: poseScaleStudio, bp: poseBPStudio, gluco: poseGlucoStudio, padbox: posePadBoxStudio };
 // where each group was built: put back before posing (a combined shot moves and turns them). Recorded the first time
 // each is seen: the stand is a stand-in until its worker has meshed it, then replaced
 const HOME = new Map();
-const homeObjects = () => [tablet, stand, phone, box, mband, block, bloom, scale, bp, gluco, bandsRig.group, bandsRig.helpers];
+const homeObjects = () => [tablet, stand, phone, box, mband, block, bloom, scale, bp, gluco, padbox, bandsRig.group, bandsRig.helpers];
 function restoreHome() {
   for (const o of homeObjects()) {
     if (!HOME.has(o)) HOME.set(o, [o.position.clone(), o.quaternion.clone(), o.scale.clone()]);
@@ -676,10 +689,11 @@ function applyPose() {
   scale.visible = on.has('scale');
   bp.visible = on.has('bp');
   gluco.visible = on.has('gluco');
+  padbox.visible = on.has('padbox');
   bandsRig.group.visible = on.has('bands'); applyBandAids();
   stand.visible = on.has('pad') && state.stand;
   const mbFlat = isMBand() && state.mbandPose !== 'worn';
-  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : isScale() ? 22 : isBP() ? 12 : isGluco() ? 6 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : isScale() ? 150 : isBP() ? 90 : isGluco() ? 60 : 140);
+  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : isScale() ? 22 : isBP() ? 12 : isGluco() ? 6 : isPadBox() ? 22 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : isScale() ? 150 : isBP() ? 90 : isGluco() ? 60 : isPadBox() ? 160 : 140);
   if (comboOn()) {
     // each device in its own pose, then set side by side
     for (const d of members()) POSER[d]();
@@ -695,6 +709,8 @@ function applyPose() {
     poseBloomStudio();
   } else if (isScale()) {
     poseScaleStudio();
+  } else if (isPadBox()) {
+    posePadBoxStudio();
   } else if (isGluco()) {
     poseGlucoStudio();
   } else if (isBP()) {
@@ -723,7 +739,7 @@ function applyPose() {
 // distance, starting where the pose puts it: on the floor, or the box floating at its mockup's height
 const floorGaps = {};
 let floorRange = null;   // its slider (bound with the other shadow controls)
-const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isScale() ? `scale:${state.scaleTilt}` : isBP() ? `bp:${state.bpPose}` : isGluco() ? `gluco:${state.glPose}` : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
+const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isScale() ? `scale:${state.scaleTilt}` : isBP() ? `bp:${state.bpPose}` : isGluco() ? `gluco:${state.glPose}` : isPadBox() ? 'padbox' : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
 function setFloor(fromPose) {
   if (isBands()) {
     // the bands' floor is their simulation's: fixed at y = 0. The slider sets how high the floating presets hang
@@ -755,6 +771,7 @@ function boundsOfDevice(d, exact = false) {
   if (d === 'scale') return new THREE.Box3().setFromObject(scale);
   if (d === 'bp') return visibleBox(bp);
   if (d === 'gluco') return visibleBox(gluco);
+  if (d === 'padbox') return visibleBox(padbox);
   if (d === 'bands') { const b = bandsRig.bounds(); if (b.isEmpty()) return new THREE.Box3(new THREE.Vector3(-10, 0, -10), new THREE.Vector3(10, 20, 10)); bandsRig.group.updateMatrixWorld(true); return b.clone().applyMatrix4(bandsRig.group.matrixWorld); }
   const bb = new THREE.Box3().setFromObject(tablet);
   if (state.stand) bb.expandByObject(stand);
@@ -780,16 +797,21 @@ function makeScreen(w, h, mat) {
 const screens = {
   pad: makeScreen(3200, Math.round(3200 * DIM.display.h / DIM.display.w), M.screen),
   iphone: makeScreen(Math.round(3000 * PHONE.display.w / PHONE.display.h), 3000, P.screen),
+  padbox: makeScreen(3200, Math.round(3200 * DIM.display.h / DIM.display.w), PBX.screen),   // the boxed pad's own screen (off until set)
 };
 let screenSource = null; // HTMLImageElement | canvas | null (off)
 
 function updateScreen() {
-  if (!screens[state.device]) return requestRender();   // the box has no screen
-  screenSet[state.device] = true;
-  paintScreen(state.device, screenSource);
+  const dev = state.device;
+  if (!screens[dev]) return requestRender();   // the box has no screen
+  screenSet[dev] = true;
+  paintScreen(dev, screenSource);
 }
 // which screens have been set (shown, changed or turned off) while their device was being edited
-const screenSet = { pad: false, iphone: false };
+const screenSet = { pad: false, iphone: false, padbox: false };
+// each screen's own setting, kept while another device is edited: the boxed pad's (off at first) and the Sword Pad's
+// stay apart
+const screenMem = {};
 function paintScreen(dev, screenSource) {
   const { canvas, tex, mat } = screens[dev];
   const ctx = canvas.getContext('2d');
@@ -863,7 +885,10 @@ const LIGHTING = { default: { room: [0.16, 0.30, 0.62], key: 1 },
   // the blood pressure monitor, as in its product shots: a bright, even white studio, the key soft and high
   bp: { room: [0.7, 0.62, 0.42], key: 0.8, fill: 1.2, scrim: 0.9 },
   // the glucometer: the same bright, even white studio as its product shots
-  gluco: { room: [0.7, 0.62, 0.42], key: 0.8, fill: 1.2, scrim: 0.9 } };
+  gluco: { room: [0.7, 0.62, 0.42], key: 0.8, fill: 1.2, scrim: 0.9 },
+  // the Sword Pad Box, as in its renders: the key high on the front right, a darker room, so each face of the white board
+  // keeps its own tone (top, lit long side, the short side in soft shade)
+  padbox: { room: [0.05, 0.16, 0.6], key: 1.3, fill: 0.55, scrim: 0.12 } };
 const lighting = () => LIGHTING[state.device in LIGHTING ? state.device : 'default'];
 
 function buildEnvironment() {
@@ -1307,6 +1332,8 @@ function frameBloom() {
 }
 // the blood pressure monitor: standing from the front right (its USB side), a little above (as ref-1); lying from the left, higher (ref-2)
 // the glucometer: upright from the front right, a little above (as its three-quarter shots); lying from above
+// the Sword Pad Box: from the front left, well above (as its renders: the symbol's short side and the logo's long side)
+function framePadBox() { frame(-35, state.pb.lid === 'closed' ? 24 : 30); }
 function frameGluco() { if (state.glPose === 'lying') frame(-20, 45); else frame(22, 12); }
 function frameBP() { if (state.bpPose === 'lying') frame(-30, 32); else frame(25, 10); }
 // the scale: its three-quarter shot's camera (a 55 mm lens from the front left, well above: fitted to the shot's
@@ -1407,23 +1434,40 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
     if (!comboOn() && own(state.device) && state.device !== v) { if (state.device === 'box') boxLook = grabLook(); else if (state.device === 'bands') bandsLook = grabLook(); else blockLook = grabLook(); if (!own(v)) applyLook(otherLook); }
     if (!comboOn() && own(v) && state.device !== v) { if (!own(state.device)) otherLook = grabLook(); applyLook(v === 'box' ? boxLook : v === 'bands' ? bandsLook : blockLook); }
     if (state.comboOn && state.device !== v && !state.combo.includes(state.device)) state.combo.push(state.device);   // combined: the last one stays in the shot
+    if (screens[state.device] && state.device !== v) screenMem[state.device] = { preset: screenPreset, source: screenSource };
+    const fromBox = state.device === 'padbox';
     state.device = v;
     // the M-Band's renders are lit from the upper left, the light catching the tops of the yarn and the pod's edges
     if (v === 'mband' && !mbandLit) { mbandLit = true; state.lightAz = -35; state.lightEl = 38; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     // the Bloom pod's renders are lit from above and the front left: the tops of the pod and the tail bright, their
     // undersides a deeper lilac
     if (v === 'bloom' && !bloomLit) { bloomLit = true; state.lightAz = -50; state.lightEl = 62; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
+    if (v === 'padbox' && !pbLit) { pbLit = true; state.lightAz = 30; state.lightEl = 40; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'gluco' && !glLit) { glLit = true; state.lightAz = -30; state.lightEl = 55; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'bp' && !bpLit) { bpLit = true; state.lightAz = -30; state.lightEl = 55; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'scale' && !scaleLit) { scaleLit = true; state.lightAz = -35; state.lightEl = 58; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'bands' && !bandsRig.meshes.length) bandsRig.setup();
     syncSetupUI(); applyPose(); updateLights(); drawLightPad();
-    if (comboOn()) { if (!pickedInView) frame(); } else if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else if (v === 'gluco') frameGluco(); else frame(32, 14);
+    if (comboOn()) { if (!pickedInView) frame(); } else if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else if (v === 'gluco') frameGluco(); else if (v === 'padbox') framePadBox(); else frame(32, 14);
     renderPicker(); renderCombo();
-    if (screenPreset === 'exercise') setScreenPreset('exercise'); else updateScreen();
+    if ((v === 'padbox' || fromBox) && screens[v]) {
+      // the boxed pad and the Sword Pad each keep their own screen; the boxed pad's starts off
+      const m = screenMem[v] ?? (v === 'padbox' ? { preset: 'off', source: null } : null);
+      if (m) { screenPreset = m.preset; screenSource = m.source; document.querySelectorAll('[data-screen]').forEach((b) => b.classList.toggle('on', b.dataset.screen === screenPreset)); }
+      if (screenPreset === 'exercise') setScreenPreset('exercise'); else updateScreen();
+    } else if (screenPreset === 'exercise') setScreenPreset('exercise'); else updateScreen();
   }
   if (name === 'boxpose') { state.boxPose = v; applyPose(); updateLights(); frameBox(); }
   if (name === 'mbandpose') { state.mbandPose = v; applyPose(); updateLights(); frameMBand(); }
+  if (name === 'pblid') {
+    state.pb.lid = v;
+    if (v === 'open' && !state.pb.lidLift) { state.pb.lidLift = PADBOX_DEFAULTS.lidLift; state.pb.lidTilt = PADBOX_DEFAULTS.lidTilt; state.pb.lidSlide = PADBOX_DEFAULTS.lidSlide; pbSliders(); }
+    syncSetupUI(); applyPose(); updateLights(); framePadBox();
+  }
+  if (name === 'pbpad') { state.pb.pad = v === 'in'; syncSetupUI(); applyPose(); updateLights(); requestRender(); }
+  if (name === 'pblang') { state.pb.lang = v; applyPose(); requestRender(); }
+  if (name === 'pbcharger') { state.pb.charger = v; applyPose(); requestRender(); }
+  if (name === 'pbpaper') { state.pb.paper = v === 'with'; syncSetupUI(); applyPose(); updateLights(); requestRender(); }
   if (name === 'glpose') { state.glPose = v; syncSetupUI(); applyPose(); updateLights(); frameGluco(); }
   if (name === 'glstrip') { state.glStrip = v === 'with'; applyPose(); updateLights(); requestRender(); }
   if (name === 'glreading') {
@@ -1558,12 +1602,22 @@ for (const k of ['sys', 'dia', 'pulse', 'time']) document.getElementById('bp-' +
 function syncSetupUI() {
   const ph = isPhone();
   $('#stand-row').classList.toggle('hidden', !isPad());
-  $('#pose-row').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || isGluco() || (isPad() && state.stand));
+  $('#pose-row').classList.toggle('hidden', isPadBox() || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || isGluco() || (isPad() && state.stand));
   $('#mband-pose-row').classList.toggle('hidden', !isMBand());
   $('#block-pose-row').classList.toggle('hidden', !isBlock());
   $('#bloom-light-row').classList.toggle('hidden', !isBloom());
   $('#scale-reading-row').classList.toggle('hidden', !isScale());
   $('#scale-tilt').closest('.slider').classList.toggle('hidden', !isScale());
+  { const pb = isPadBox(), o = state.pb;
+    $('#pb-lid-row').classList.toggle('hidden', !pb);
+    for (const id of ['pb-lift', 'pb-tilt', 'pb-slide']) $('#' + id).closest('.slider').classList.toggle('hidden', !pb || o.lid !== 'open');
+    $('#pb-pad-row').classList.toggle('hidden', !pb);
+    $('#pb-padtilt').closest('.slider').classList.toggle('hidden', !pb || !o.pad || o.lid === 'closed');   // a closed lid holds it flat
+    $('#pb-paper-row').classList.toggle('hidden', !pb || o.lid === 'closed' || !o.pad);   // the paper comes out with the pad
+    $('#pb-charger-row').classList.toggle('hidden', !pb);
+    $('#pb-lang-row').classList.toggle('hidden', !pb);
+    for (const id of ['pb-peel', 'pb-raise']) $('#' + id).closest('.slider').classList.toggle('hidden', !pb || !o.paper || !o.pad || o.lid === 'closed');
+    setSeg('pblid', o.lid); setSeg('pbpad', o.pad ? 'in' : 'out'); setSeg('pbpaper', o.paper ? 'with' : 'without'); setSeg('pbcharger', o.charger); setSeg('pblang', o.lang); }
   $('#gl-pose-row').classList.toggle('hidden', !isGluco());
   $('#gl-lean-row').classList.toggle('hidden', !isGluco() || state.glPose !== 'upright');
   $('#gl-strip-row').classList.toggle('hidden', !isGluco());
@@ -1584,7 +1638,7 @@ function syncSetupUI() {
   document.querySelectorAll('[data-band]').forEach((b) => b.classList.toggle('on', bandsRig.opts.on[b.dataset.band]));
   { const o = bandsRig.opts; setSeg('bandpos', o.pos); setSeg('bandshape', o.shape); setSeg('bandlay', o.lay); setSeg('bandprint', o.print); setSeg('bandpouch', o.pouch ? 'with' : 'without'); $('#band-hooks').checked = bandHooksWanted; }
   $('#band-hooks-row').classList.toggle('hidden', !bandHooksAllowed());   // only hung and stretched bands have hooks to show
-  $('#screen-section').classList.toggle('hidden', isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || isGluco());   // the box, the bands, the M-Band and the block have no screen
+  $('#screen-section').classList.toggle('hidden', (isPadBox() && !state.pb.pad) || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || isGluco());   // the box, the bands, the M-Band and the block have no screen
   $('#finish-row').classList.toggle('hidden', !ph);
   $('#phoenix-section').classList.toggle('hidden', !ph);
   phx.group.visible = ph && state.phoenix.on;
@@ -1599,7 +1653,7 @@ document.querySelectorAll('[data-finish]').forEach((b) => b.addEventListener('cl
 }));
 
 // lighting
-let envTimer = 0, mbandLit = false, bloomLit = false, scaleLit = false, bpLit = false, glLit = false;
+let envTimer = 0, mbandLit = false, bloomLit = false, scaleLit = false, bpLit = false, glLit = false, pbLit = false;
 // the box's mockup is lit by a key high on the front right (the direction of its floor shadow); its floor shadow is
 // darker and a little crisper than the studio's default; its lens is set by its framing
 let boxLook = { az: BOX_SCENE.key[0], el: BOX_SCENE.key[1], strength: 0.92, soft: 0.35 }, otherLook = null;
@@ -1629,6 +1683,12 @@ function lightChanged() {
 const lAz = bindRange('light-az', 'lightAz', deg, lightChanged);
 const lEl = bindRange('light-el', 'lightEl', deg, lightChanged);
 bindRange('key', 'keyIntensity', pct, lightChanged);
+// the Sword Pad Box's lid, pad and paper (state.pb)
+const cmf = (v) => `${Math.round(v * 10) / 10} cm`;
+const pbBind = (id, key, fmt) => bindRange(id, null, fmt, (v) => { state.pb[key] = v; applyPose(); updateLights(); requestRender(); });
+const pbR = { lidLift: pbBind('pb-lift', 'lidLift', cmf), lidTilt: pbBind('pb-tilt', 'lidTilt', deg), lidSlide: pbBind('pb-slide', 'lidSlide', cmf), padTilt: pbBind('pb-padtilt', 'padTilt', deg), paperLift: pbBind('pb-peel', 'paperLift', (v) => `${Math.round(v / 2)}%`), paperRaise: pbBind('pb-raise', 'paperRaise', cmf) };
+function pbSliders() { for (const k in pbR) { pbR[k].el.value = state.pb[k]; pbR[k].show(); } }
+pbSliders();
 bindRange('scale-tilt', 'scaleTilt', deg, () => { applyPose(); updateLights(); requestRender(); });   // the scale's tilt
 $('#scale-tilt').addEventListener('change', () => frameScale());   // re-fitted once the slider is let go
 bindRange('gl-lean', 'glLean', deg, () => { applyPose(); updateLights(); requestRender(); });   // the glucometer's lean, upright
@@ -1852,10 +1912,10 @@ async function setScreenPreset(name) {
   document.querySelectorAll('[data-screen]').forEach((b) => b.classList.toggle('on', b.dataset.screen === name));
   if (name === 'off') screenSource = null;
   else if (name === 'exercise') {
-    const dev = state.device;
+    const dev = scrDev();
     if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;
     const src = dev === 'pad' ? await padExerciseSource() : await phoneExerciseSource();
-    if (!src || screenPreset !== 'exercise' || state.device !== dev) return; // changed while loading
+    if (!src || screenPreset !== 'exercise' || scrDev() !== dev) return; // changed while loading
     screenSource = src;
   }
   updateScreen();
@@ -1865,7 +1925,7 @@ const refreshExercise = () => { if (screenPreset === 'exercise') setScreenPreset
 // (rather than a black, switched-off screen)
 async function comboScreens() {
   for (const dev of ['pad', 'iphone']) {
-    if (screenSet[dev] || dev === state.device || !members().includes(dev)) continue;
+    if (screenSet[dev] || dev === scrDev() || !(members().includes(dev) || (dev === 'pad' && members().includes('padbox')))) continue;
     screenSet[dev] = true;
     if (dev === 'iphone') screenDefaults();   // (its arrows and reps from the chosen screen, as when it is picked)
     const src = dev === 'pad' ? await padExerciseSource() : await phoneExerciseSource();
@@ -1898,7 +1958,7 @@ function screenDefaults() {
   repsRange.el.value = state.reps; repsRange.show();
 }
 function renderPicker() {
-  const dev = state.device;
+  const dev = scrDev();
   $('#exercise-picker').classList.toggle('hidden', dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp' || dev === 'gluco');
   if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;   // the box, the bands, the M-Band and the block have no screen
   const list = CATALOG[dev], p = state.pick[dev];
@@ -1944,17 +2004,17 @@ document.querySelectorAll('[data-pick]').forEach((g) => g.addEventListener('clic
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   const name = g.dataset.pick;
   if (name === 'arrows' || name === 'stage') { state[name] = b.dataset.value; renderScreenControls(); setScreenPreset('exercise'); return; }
-  state.pick[state.device][name] = b.dataset.value;
+  state.pick[scrDev()][name] = b.dataset.value;
   pickChanged();
 }));
-pickSel.addEventListener('change', () => { state.pick[state.device].ex = pickSel.value; pickChanged(); });
+pickSel.addEventListener('change', () => { state.pick[scrDev()].ex = pickSel.value; pickChanged(); });
 pickThumbs.addEventListener('click', (e) => {
   const b = e.target.closest('.thumb'); if (!b) return;
-  state.pick[state.device].key = b.dataset.key;
+  state.pick[scrDev()].key = b.dataset.key;
   if (state.device === 'iphone') screenDefaults();
   pickChanged();
 });
-bindRange('progress', 'progress', (v) => `${Math.round(v)}%`, () => { if (state.device === 'pad') refreshExercise(); });
+bindRange('progress', 'progress', (v) => `${Math.round(v)}%`, () => { if (scrDev() === 'pad') refreshExercise(); });
 const repsRange = bindRange('reps', 'reps', (v) => `${Math.round(v)}/10`, () => { if (state.device === 'iphone') refreshExercise(); });
 // the Phoenix message follows the chosen screen until you type your own (max 45 characters)
 const msgInput = $('#pill-msg');
@@ -1962,9 +2022,9 @@ msgInput.addEventListener('input', () => {
   state.msg = msgInput.value.slice(0, PILL_MAX);
   $('#pill-count').textContent = `${state.msg.length}/${PILL_MAX}`;
   $('#pill-reset').hidden = false;
-  if (state.device === 'pad') refreshExercise();
+  if (scrDev() === 'pad') refreshExercise();
 });
-$('#pill-reset').addEventListener('click', () => { state.msg = null; renderScreenControls(); if (state.device === 'pad') refreshExercise(); });
+$('#pill-reset').addEventListener('click', () => { state.msg = null; renderScreenControls(); if (scrDev() === 'pad') refreshExercise(); });
 document.querySelectorAll('[data-screen]').forEach((b) => b.addEventListener('click', () => {
   if (b.dataset.screen === 'custom') { if (presets.custom) { screenPreset = 'custom'; screenSource = presets.custom; document.querySelectorAll('[data-screen]').forEach((x) => x.classList.toggle('on', x === b)); updateScreen(); } else $('#file').click(); return; }
   setScreenPreset(b.dataset.screen);
@@ -1987,10 +2047,10 @@ $('#file').addEventListener('change', (e) => useFile(e.target.files[0]));
 viewport.addEventListener('dragover', (e) => { e.preventDefault(); viewport.classList.add('drop'); });
 viewport.addEventListener('dragleave', () => viewport.classList.remove('drop'));
 viewport.addEventListener('drop', (e) => { e.preventDefault(); viewport.classList.remove('drop'); useFile(e.dataTransfer.files[0]); });
-bindRange('screen-bright', 'screenBrightness', pct, (v) => { if (screenSource) M.screen.emissiveIntensity = P.screen.emissiveIntensity = v; requestRender(); });
+bindRange('screen-bright', 'screenBrightness', pct, (v) => { if (screenSource) (isPadBox() ? PBX.screen : M.screen).emissiveIntensity = P.screen.emissiveIntensity = v; requestRender(); });
 bindRange('screen-reflect', 'screenReflect', pct, (v) => applyReflect(v));
 function applyReflect(v) {
-  for (const m of [M.screen, P.screen, M.glass]) { m.clearcoat = v; m.specularIntensity = 0.05 + 0.25 * v; }   // the coat is the sharp reflection; the rougher base under it only a faint haze
+  for (const m of [M.screen, P.screen, M.glass, PBX.screen, PBX.glass]) { if (m.userData.cc !== undefined) { m.userData.cc = v; m.userData.sp = 0.05 + 0.25 * v; continue; } m.clearcoat = v; m.specularIntensity = 0.05 + 0.25 * v; }   // (the boxed pad's, under its paper: kept for when the paper is off)
   requestRender();
 }
 
@@ -2270,7 +2330,7 @@ async function exportImage() {
     const type = state.format === 'png' ? 'image/png' : 'image/jpeg';
     const blob = await new Promise((r) => out.toBlob(r, type, 0.95));
     const { az, el } = getCamAngles();
-    const subject = comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}${state.scaleTilt ? `_tilt-${Math.round(state.scaleTilt)}` : ''}` : isBloom() ? `sword-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-m-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `thrive-pad_${state.stand ? 'stand' : state.pose}`;
+    const subject = comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isPadBox() ? `sword-pad-box_${state.pb.lid === 'off' ? 'no-lid' : state.pb.lid}_${state.pb.pad ? 'pad' : 'empty'}${state.pb.paper && state.pb.lid !== 'closed' ? '_paper' : ''}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}${state.scaleTilt ? `_tilt-${Math.round(state.scaleTilt)}` : ''}` : isBloom() ? `pelvic-health-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `sword-pad_${state.stand ? 'stand' : state.pose}`;
     const name = `${subject}_az${Math.round(az)}_el${Math.round(el)}_${W}x${H}.${state.format}`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -2287,7 +2347,7 @@ async function exportImage() {
   }
 }
 $('#download').addEventListener('click', exportImage);
-if (new URLSearchParams(location.search).has('debug')) window.__studio = { renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
+if (new URLSearchParams(location.search).has('debug')) window.__studio = { padbox, PBX, framePadBox, renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
 
 // ---------------------------------------------------------------- init
 if (IS_TOUCH) $('.hint').textContent = 'Drag to rotate · Pinch to zoom · Two-finger drag to pan';
@@ -2312,7 +2372,7 @@ stand = standMesh;
 model.add(stand);
 applyPose();
 updateLights();
-if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else if (isBloom()) frameBloom(); else if (isScale()) frameScale(); else if (isBP()) frameBP(); else if (isGluco()) frameGluco(); else frame(32, 14);   // a device may have been picked while the studio loaded
+if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else if (isBloom()) frameBloom(); else if (isScale()) frameScale(); else if (isBP()) frameBP(); else if (isGluco()) frameGluco(); else if (isPadBox()) framePadBox(); else frame(32, 14);   // a device may have been picked while the studio loaded
 $('#busy').classList.remove('show');
 $('#busy-text').textContent = 'Rendering…';
 // open on a device from a link, e.g. ?device=bands (the Figma "Sword 3D Studio" card links each device this way)

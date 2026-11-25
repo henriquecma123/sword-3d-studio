@@ -132,9 +132,21 @@ function noiseTexture(size = 512, seed = 7) {
 }
 
 function logoTexture() {
-  // baked from tools/textures.js so the wordmark looks identical on every OS
-  const t = new THREE.TextureLoader().load(new URL('./assets/logo.png', import.meta.url).href);
+  // the Sword logo (Figma, Brand Library Assets 11668:3634), white on black (an alpha map), drawn once it has loaded
+  const cv = document.createElement('canvas'); cv.width = 2120; cv.height = 512;
+  const t = new THREE.CanvasTexture(cv);
   t.anisotropy = 8;
+  const im = new Image();
+  im.onload = () => {
+    const x = cv.getContext('2d'), ar = 285 / 69.5205;
+    x.fillStyle = '#000'; x.fillRect(0, 0, cv.width, cv.height);
+    const w = Math.min(cv.width, cv.height * ar), h = w / ar;
+    const c = document.createElement('canvas'); c.width = Math.round(w); c.height = Math.round(h);
+    const g = c.getContext('2d'); g.drawImage(im, 0, 0, c.width, c.height); g.globalCompositeOperation = 'source-in'; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    x.drawImage(c, (cv.width - w) / 2, (cv.height - h) / 2);
+    t.needsUpdate = true;
+  };
+  im.src = new URL('./assets/sword-logo-mono.svg', import.meta.url).href;
   return t;
 }
 
