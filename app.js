@@ -58,6 +58,7 @@ const state = {
   glReading: 'normal',        // its LCD: normal (108) | high (212) | low (64) | custom (the fields)
   bpReading: 'high',          // its LCD: high (138/88) | low (105/68) | custom (the fields)
   scaleReading: '185.0',      // the scale's display: any digits, one decimal point
+  scaleTilt: 0,               // the scale turned over towards the viewer (degrees): 0 on its feet, 180 upside down (its base and feet up)
   bloomLight: false,          // Bloom pod: its light on or off (the renders show both)
   comboOn: false,             // several devices in one shot: this one (device) with the others ticked (combo)
   combo: [],
@@ -277,8 +278,9 @@ function poseBPStudio() {
   bp.position.set(-c.x, -b.min.y + 0.001, -c.z);
 }
 
-// the scale: on its feet, on the floor
+// the scale: on its feet, on the floor, or tilted over towards the viewer (up to upside down), resting on its lowest point
 function poseScaleStudio() {
+  scale.rotation.set(state.scaleTilt * DEG, 0, 0);
   scale.position.set(0, 0, 0);
   scale.updateMatrixWorld(true);
   const b = new THREE.Box3().setFromObject(scale, true), c = b.getCenter(new THREE.Vector3());
@@ -721,7 +723,7 @@ function applyPose() {
 // distance, starting where the pose puts it: on the floor, or the box floating at its mockup's height
 const floorGaps = {};
 let floorRange = null;   // its slider (bound with the other shadow controls)
-const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isScale() ? 'scale' : isBP() ? `bp:${state.bpPose}` : isGluco() ? `gluco:${state.glPose}` : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
+const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isScale() ? `scale:${state.scaleTilt}` : isBP() ? `bp:${state.bpPose}` : isGluco() ? `gluco:${state.glPose}` : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
 function setFloor(fromPose) {
   if (isBands()) {
     // the bands' floor is their simulation's: fixed at y = 0. The slider sets how high the floating presets hang
@@ -1561,6 +1563,7 @@ function syncSetupUI() {
   $('#block-pose-row').classList.toggle('hidden', !isBlock());
   $('#bloom-light-row').classList.toggle('hidden', !isBloom());
   $('#scale-reading-row').classList.toggle('hidden', !isScale());
+  $('#scale-tilt').closest('.slider').classList.toggle('hidden', !isScale());
   $('#gl-pose-row').classList.toggle('hidden', !isGluco());
   $('#gl-lean-row').classList.toggle('hidden', !isGluco() || state.glPose !== 'upright');
   $('#gl-strip-row').classList.toggle('hidden', !isGluco());
@@ -1626,6 +1629,8 @@ function lightChanged() {
 const lAz = bindRange('light-az', 'lightAz', deg, lightChanged);
 const lEl = bindRange('light-el', 'lightEl', deg, lightChanged);
 bindRange('key', 'keyIntensity', pct, lightChanged);
+bindRange('scale-tilt', 'scaleTilt', deg, () => { applyPose(); updateLights(); requestRender(); });   // the scale's tilt
+$('#scale-tilt').addEventListener('change', () => frameScale());   // re-fitted once the slider is let go
 bindRange('gl-lean', 'glLean', deg, () => { applyPose(); updateLights(); requestRender(); });   // the glucometer's lean, upright
 bindRange('env', 'envIntensity', pct, (v) => { scene.environmentIntensity = v; requestRender(); });
 bindRange('exposure', 'exposure', (v) => v.toFixed(2), (v) => { renderer.toneMappingExposure = v; requestRender(); });
@@ -2265,7 +2270,7 @@ async function exportImage() {
     const type = state.format === 'png' ? 'image/png' : 'image/jpeg';
     const blob = await new Promise((r) => out.toBlob(r, type, 0.95));
     const { az, el } = getCamAngles();
-    const subject = comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}` : isBloom() ? `sword-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-m-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `thrive-pad_${state.stand ? 'stand' : state.pose}`;
+    const subject = comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}${state.scaleTilt ? `_tilt-${Math.round(state.scaleTilt)}` : ''}` : isBloom() ? `sword-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-m-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `thrive-pad_${state.stand ? 'stand' : state.pose}`;
     const name = `${subject}_az${Math.round(az)}_el${Math.round(el)}_${W}x${H}.${state.format}`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
