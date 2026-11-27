@@ -126,7 +126,7 @@ section h2 {
    onto two lines): five on a wide panel, four in the side panel and on phones */
 .devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(74px, calc((100% - 24px) / 5)), 1fr)); gap: 6px; margin-bottom: 4px; }
 /* the devices by health area: a small heading over each row */
-.dev-cat + .dev-cat { margin-top: 12px; }
+.dev-cat + .dev-cat { margin-top: 22px; }
 .dev-cat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; }
 .dev-cat h3 { margin: 0; font: 600 11px/1.2 Figtree, -apple-system, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: var(--grey-600); }
 /* a health area's kit, all in one shot */
