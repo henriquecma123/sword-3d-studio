@@ -426,7 +426,19 @@ export function createPadBoxMaterials(M, maxAniso = 8) {
   const paper = new THREE.MeshPhysicalMaterial({ alphaMap: cornerMask(26.6, 19.2, 0.9), alphaTest: 0.5,
     color: '#fbfbfa', roughness: 0.05, metalness: 0, transmission: 0.86, transmissionMap: form, thickness: 0.004, ior: 1.15,
     specularIntensity: 0.02, sheen: 0.1, sheenRoughness: 0.95, sheenColor: new THREE.Color('#ffffff'), roughnessMap: form,
-    bumpMap: bump, bumpScale: 0.12, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -12 });
+    bumpMap: bump, bumpScale: 0.12, side: THREE.DoubleSide });
+  // pulled forward in depth over the screen (which is itself pulled forward), but not near its edges: a fixed polygon
+  // offset (it was -6/-12) grows with the slope, so from low down the sheet's edge came through the box's walls and the
+  // lid's as a bright line. Here per pixel: as much as before over the middle (2.5x the slope, 12 steps), none within
+  // a few mm of the edge, which overhangs the pad's bezel and needs none
+  paper.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>
+	{ vec2 e2 = min( vAlphaMapUv, 1.0 - vAlphaMapUv ) * vec2( 26.6, 19.2 );
+	  float pull = smoothstep( 0.12, 0.45, min( e2.x, e2.y ) );
+	  float dz = max( abs( dFdx( gl_FragCoord.z ) ), abs( dFdy( gl_FragCoord.z ) ) );
+	  gl_FragDepth = gl_FragCoord.z - pull * ( 2.5 * dz + 12.0 / 16777216.0 ); }`);
+  };
+  paper.customProgramCacheKey = () => 'padbox-paper-depth';
   // the boxed pad's own screen (set in the studio's screen section; off until set)
   const screen = M.screen.clone();
   // and its own glass: under the paper it gets only the paper's diffused light, so it mirrors nothing sharp (posePadBox)
@@ -810,7 +822,8 @@ export function posePadBox(group, o) {
   paper.visible = !!o.paper && !!o.pad && o.lid !== 'closed';   // the paper comes out with the pad
   group.getObjectByName('pb-cards-en').visible = o.lang !== 'pt'; group.getObjectByName('pb-cards-pt').visible = o.lang === 'pt';
   group.getObjectByName('pb-charger-eu').visible = o.charger !== 'us'; group.getObjectByName('pb-charger-us').visible = o.charger === 'us';
-  shapePaper(paper, o.paperLift || 0);
+  // (re-shaped only when the peel changes: a video's lid move poses the box every frame)
+  if (paper.userData.peel !== (o.paperLift || 0)) { shapePaper(paper, o.paperLift || 0); paper.userData.peel = o.paperLift || 0; }
   // the paper rests on the screen (the pad in) or on the insert
   paper.rotation.set(0, 0, 0);
   if (o.pad) {
@@ -840,10 +853,15 @@ export function posePadBox(group, o) {
   if (o.lid === 'open') {
     // lifted about its centre; tilt turns its front edge up (towards the viewer). It rises clear of what is below it
     const c = LID.H / 2, tilt = -o.lidTilt * Math.PI / 180;
-    const ob = group.userData.obstacles, pts = ob.base.slice();
-    if (o.pad) for (const p of ob.pad) { _v.set(p[0], p[1], p[2]).applyMatrix4(padPivot.matrix); pts.push([_v.x, _v.y, _v.z]); }
-    if (paper.visible) { const A = paper.geometry.attributes.position; for (let i = 0; i < A.count; i++) { _v.fromBufferAttribute(A, i).applyMatrix4(paper.matrix); pts.push([_v.x, _v.y, _v.z]); } }
-    const lift = clearLift(pts, tilt, o.lidSlide, Math.max(0, o.lidLift));
+    // (lidExact: the lift as given, unchecked. A video's lid move plans its own path clear of the box, which can't
+    // be done pose by pose: on its way off, the lid's walls still round the box's)
+    let lift = Math.max(0, o.lidLift);
+    if (!o.lidExact) {
+      const ob = group.userData.obstacles, pts = ob.base.slice();
+      if (o.pad) for (const p of ob.pad) { _v.set(p[0], p[1], p[2]).applyMatrix4(padPivot.matrix); pts.push([_v.x, _v.y, _v.z]); }
+      if (paper.visible) { const A = paper.geometry.attributes.position; for (let i = 0; i < A.count; i++) { _v.fromBufferAttribute(A, i).applyMatrix4(paper.matrix); pts.push([_v.x, _v.y, _v.z]); } }
+      lift = clearLift(pts, tilt, o.lidSlide, lift);
+    }
     lid.position.set(0, lift + c, o.lidSlide);
     lid.rotation.x = tilt;
     body.position.y = -c;

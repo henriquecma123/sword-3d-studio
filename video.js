@@ -102,7 +102,8 @@ export function initVideo(ctx) {
   // horizontal), then round the vertical; then moved along the view line for the distance
   const _q = new THREE.Quaternion(), _qy = new THREE.Quaternion(), _p = new THREE.Vector3(), _t = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0);
   function poseAt(t, base, m = motionOf(v.motion)) {
-    const e = v.smooth === 2 ? easeStrong(t) : v.smooth === 1 ? easeGentle(t) : t;
+    // (a device's own move keeps its own timing, soft starts and stops included: the Speed setting is for the camera's)
+    const e = m.act ? t : v.smooth === 2 ? easeStrong(t) : v.smooth === 1 ? easeGentle(t) : t;
     if (m.act) m.act(e);   // (a device's own move: the device first, then the camera with it)
     const o = m.angle ? m.at(e, v.angle, v.dir) : m.at(e);
     // never past straight above, nor under the floor (no lower than your view, or 3° above the floor)
@@ -179,7 +180,9 @@ export function initVideo(ctx) {
     if (busy || rec) return;
     if (v.motion === 'mine' && !take) return;
     stopPlay();
-    play = { t0: performance.now(), base: baseView(), move: v.motion === 'mine' ? null : motionOf(v.motion) };
+    const move = v.motion === 'mine' ? null : motionOf(v.motion);
+    if (move?.prep) move.prep();   // (a device's move set up first, its first-time drawing costs included: then the clock starts)
+    play = { t0: performance.now(), base: baseView(), move };
     controls.enabled = false;
     $('#vid-preview').innerHTML = '■ Stop';
   }
@@ -252,8 +255,9 @@ export function initVideo(ctx) {
     const frames = Math.min(MAX_FRAMES, Math.max(2, Math.round(L * fps)));
     const m = v.motion === 'mine' ? MOTIONS.mine : motionOf(v.motion);
     // a steady loop's last frame would be its first again: stop one short, so it repeats without a stutter
-    const loops = v.smooth === 0 && v.motion !== 'mine' && m.loop && !(v.motion === 'turntable' && v.angle % 360);
+    const loops = v.motion !== 'mine' && m.loop && (m.act ? true : v.smooth === 0 && !(v.motion === 'turntable' && v.angle % 360));
     const devSaved = m.save ? m.save() : undefined;
+    if (m.prep) m.prep();
     const subject = `${ctx.subject()}_video_${v.motion === 'mine' ? 'my-movement' : v.motion}_${L.toFixed(0)}s_${W}x${H}_${v.format === 'gif' ? Math.round(fps) : v.fps}fps${alpha ? '_transparent' : ''}`;
 
     busy = true; cancel = false;
@@ -357,6 +361,7 @@ export function initVideo(ctx) {
     document.querySelectorAll('[data-move]').forEach((b) => b.classList.toggle('on', b.dataset.move === v.motion));
     $('#vid-angle-row').classList.toggle('hidden', mine || !m.angle);
     $('#vid-dir-row').classList.toggle('hidden', mine || !m.dir);
+    $('#vid-smooth-row').classList.toggle('hidden', mine || !!m.act);   // (a device's move times itself)
     if (!mine) {
       if (m.angle) {
         Object.assign(angleEl, { min: m.angle.min, max: m.angle.max, step: m.angle.step });

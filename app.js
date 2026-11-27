@@ -1063,18 +1063,18 @@ function rebuildShadowProxy() {
 
 const groundMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false,
-  uniforms: { tAcc: { value: accTarget.texture }, uCount: { value: 1 }, uStrength: { value: 0.7 }, uScale: { value: 1 / ACC_WEIGHT }, uCenter: { value: new THREE.Vector2(0.5, 0.5) }, uTexel: { value: 1 / ACC_RES }, uBlur: { value: 0 },
+  uniforms: { tAcc: { value: accTarget.texture }, uCount: { value: 1 }, uSoft: { value: 1 }, uStrength: { value: 0.7 }, uScale: { value: 1 / ACC_WEIGHT }, uCenter: { value: new THREE.Vector2(0.5, 0.5) }, uTexel: { value: 1 / ACC_RES }, uBlur: { value: 0 },
     tLive: { value: liveTarget.texture }, uMix: { value: 1 }, uLiveR: { value: 0 }, uLiveLod: { value: 0 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
   fragmentShader: `varying vec2 vUv; uniform sampler2D tAcc; uniform float uCount; uniform float uStrength; uniform float uScale;
-    uniform vec2 uCenter; uniform float uTexel; uniform float uBlur;
+    uniform vec2 uCenter; uniform float uTexel; uniform float uBlur; uniform float uSoft;
     uniform sampler2D tLive; uniform float uMix; uniform float uLiveR; uniform float uLiveLod;
     const vec2 DISK[12] = vec2[12](vec2(-0.326,-0.406),vec2(-0.840,-0.074),vec2(-0.696,0.457),vec2(-0.203,0.621),vec2(0.962,-0.195),vec2(0.473,-0.480),
       vec2(0.519,0.767),vec2(0.185,-0.893),vec2(0.507,0.064),vec2(0.896,0.412),vec2(-0.322,-0.933),vec2(-0.792,-0.598));
     void main(){
       // blur grows with distance from the object: crisp contact, soft far shadow. uBlur (texels), when set, is one blur
       // for the whole floor: the floating bands' shadows are soft everywhere, and their samples' copies would show
-      float rad = uTexel * (uBlur > 0.0 ? uBlur : mix(0.8, 7.0, smoothstep(0.02, 0.22, distance(vUv, uCenter))));
+      float rad = uTexel * uSoft * (uBlur > 0.0 ? uBlur : mix(0.8, 7.0, smoothstep(0.02, 0.22, distance(vUv, uCenter))));
       float acc = texture2D(tAcc, vUv).r;
       for (int i = 0; i < 12; i++) acc += texture2D(tAcc, vUv + DISK[i] * rad).r;
       float s = (acc / 13.0) * uScale / max(uCount, 1.0);
@@ -1102,8 +1102,12 @@ let shadowCap = SHADOW_SAMPLES;
 const MOVING_SHADOW_SAMPLES = 320;
 let accCount = 0;
 
-function resetShadow() {
+// a device moving in a preview (its lid lifting): its floor shadow re-done each frame from the same few first directions
+// (steady, no shimmer), blurred wider till more come in, so their separate copies don't show as steps
+let movingSoft = false;
+function resetShadow(moving = false) {
   accCount = 0; ambI = 0; keyI = 0; liveDirty = true;
+  movingSoft = moving; groundMat.uniforms.uSoft.value = moving ? 4 : 1;
   groundMat.uniforms.uMix.value = isBands() ? 0 : 1;   // (the bands' live shadow: drawn in their own studio, so only when they are the device being edited)
   const prev = renderer.getRenderTarget();
   renderer.setRenderTarget(accTarget);
@@ -1187,6 +1191,7 @@ function accumulate(n) {
   renderer.autoClear = prevAuto;
   renderer.toneMapping = prevTone;
   groundMat.uniforms.uCount.value = accCount;
+  if (movingSoft) groundMat.uniforms.uSoft.value = THREE.MathUtils.lerp(4, 1, THREE.MathUtils.smoothstep(accCount, 24, 320));
   groundMat.uniforms.uMix.value = isBands() ? THREE.MathUtils.smoothstep(accCount / SHADOW_SAMPLES, 0.15, 1) : 1;
   return true;
 }
@@ -2439,17 +2444,30 @@ function hideBusy() {
   $('#busy-text').textContent = 'Rendering…';
   requestRender();
 }
-if (new URLSearchParams(location.search).has('debug')) window.__studio = { travelbag, TBM, frameBag, padbox, PBX, framePadBox, renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
+if (new URLSearchParams(location.search).has('debug')) window.__studio = { deviceMoves, posePadBox, travelbag, TBM, frameBag, padbox, PBX, framePadBox, renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
 
 // ---------------------------------------------------------------- the devices' own moves, for videos
 // what a device can do itself, as a video's movement: its zip opening, its lid lifting, its display counting up, its
-// light coming on. Each: act(t) sets the device at t (0..1, eased by the video's Speed); at(t) moves the camera with it
+// light coming on. Each: act(t) sets the device at t (0..1, the video's own time: each move times itself, with soft starts and stops, and the Speed setting is only for camera movements); at(t) moves the camera with it
 // (as the camera movements: az degrees round, el degrees over, k distance); save() and restore() keep and put back how
 // it was (round a video); done() shows where it ended in the panel's controls (a preview stays at its end)
-function deviceChanged(floor = true) { markShadowDirty(); if (floor) resetShadow(); requestRender(); }   // (floor: its soft floor shadow re-done too)
+function deviceChanged(floor = true) { markShadowDirty(); if (floor) { syncProxyParts(); resetShadow(); } requestRender(); }   // (floor: its soft floor shadow re-done too)
+// a frame of a device's move: its floor shadow re-done (in a video's frames in full; in a preview softened: resetShadow)
+function deviceMoved() { markShadowDirty(); syncProxyParts(); resetShadow(!videoFrames); requestRender(); }
+// the floor shadow's stand-in (a copy of the model, made when the pose is set) follows the device's moving parts: its
+// lid, slider, pad. Without this the floor showed the shadow of the pose before the video (the lid where it was)
+function syncProxyParts() {
+  if (!proxy) return;
+  const a = [], b = [];
+  model.traverse((o) => a.push(o)); proxy.traverse((o) => b.push(o));
+  if (a.length !== b.length) { rebuildShadowProxy(); return; }
+  for (let i = 0; i < a.length; i++) { const o = a[i], p = b[i]; p.position.copy(o.position); p.quaternion.copy(o.quaternion); p.scale.copy(o.scale); p.visible = o.visible; }
+  proxy.updateMatrixWorld(true);
+}
 function deviceMoves() {
   if (comboOn()) return [];
   const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const sw = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return (1 - Math.cos(Math.PI * t)) / 2; };   // (a soft window: still before a, still after b)
   if (isBag()) {   // the travel bag: its zip
     // (its floor shadow hardly changes as it opens: kept while it moves, re-done where it ends)
     const set = (v) => { state.tbOpen = v; travelbag.userData.setOpen?.(v); poseBagStudio(); deviceChanged(false); };
@@ -2457,31 +2475,104 @@ function deviceMoves() {
     const keep = { save: () => state.tbOpen, restore: (v) => { set(v); ui(); }, done: ui };
     return [
       { key: 'bag-unzip', label: 'Unzip', dur: 7, ...keep, note: 'The zip opens softly, from closed to all the way open, the camera drifting in and up a little.',
-        act: (t) => set(t), at: (t) => ({ az: 8 * t, el: 12 * t, k: 1 - 0.08 * t }) },
+        act: (t) => set(sw(0.05, 0.92, t)), at: (t) => { const u = sw(0, 1, t); return { az: 8 * u, el: 12 * u, k: 1 - 0.08 * u }; } },
       { key: 'bag-look', label: 'Unzip & look in', dur: 9, ...keep, note: 'The zip opens, then the camera rises over the bag to look inside.',
-        act: (t) => set(ss(0, 0.6, t)), at: (t) => { const u = ss(0.4, 1, t); return { az: 10 * u, el: 50 * u, k: 1 - 0.15 * u }; } },
+        act: (t) => set(sw(0.04, 0.55, t)), at: (t) => { const u = sw(0.3, 1, t); return { az: 10 * u, el: 50 * u, k: 1 - 0.15 * u }; } },
       { key: 'bag-zip', label: 'Zip up', dur: 6, ...keep, note: 'From all the way open, the zip closes softly.',
-        act: (t) => set(1 - t), at: (t) => ({ az: -6 * t, el: 10 * (1 - t) }) },
+        act: (t) => set(1 - sw(0.06, 0.94, t)), at: (t) => { const u = sw(0, 1, t); return { az: -6 * u, el: 10 * (1 - u) }; } },
       { key: 'bag-loop', label: 'Open & close', dur: 10, loop: true, ...keep, note: 'It opens and closes again: a loop.',
-        act: (t) => set(Math.sin(Math.PI * t)), at: (t) => ({ el: 10 * Math.sin(Math.PI * t) }) },
+        act: (t) => set((1 - Math.cos(2 * Math.PI * t)) / 2), at: (t) => ({ el: 5 * (1 - Math.cos(2 * Math.PI * t)) }) },
     ];
   }
-  if (isPadBox()) {   // the Pad Box: its lid, lifting to the open pose set with its sliders (or the usual one)
+  if (isPadBox()) {   // the Pad Box: its lid, coming off to the open pose set with its sliders (or the usual one)
     const o0 = { ...state.pb }, D = PADBOX_DEFAULTS;
-    const T = o0.lid === 'open' && o0.lidLift > 0 ? { lift: o0.lidLift, tilt: o0.lidTilt, slide: o0.lidSlide } : { lift: D.lidLift, tilt: D.lidTilt, slide: D.lidSlide };
+    const T = o0.lid === 'open' ? { lift: o0.lidLift, tilt: o0.lidTilt, slide: o0.lidSlide, pad: o0.padTilt || 0 }
+      : { lift: D.lidLift, tilt: D.lidTilt, slide: D.lidSlide, pad: o0.padTilt || 0 };
+    // the lid's path, planned once (at its first frame): straight up the box's walls until its rim is clear, then on
+    // to the open pose, tipping back and sliding as it goes on rising. One smooth curve, never through the box: where
+    // tipping would dip a corner into it, the rise swells just enough (e: 0 closed .. 1 open)
+    let path = null;
+    const plan = () => {
+      const need = (tilt, slide, pad) => { posePadBox(padbox, { ...o0, lid: 'open', lidLift: 0, lidTilt: tilt, lidSlide: slide, padTilt: pad }); return padbox.userData.lidLift; };
+      const Hc = need(0, 0, 0) + 0.8;
+      posePadBox(padbox, { ...o0, lid: 'open', lidLift: T.lift, lidTilt: T.tilt, lidSlide: T.slide, padTilt: T.pad });
+      const L1 = padbox.userData.lidLift;   // (where the sliders' pose ends up, as the panel would show it)
+      const a = 0.38, s = (u) => u * u * u * (u * (u * 6 - 15) + 10);
+      // the rise: a monotone cubic through (0, 0), (a, Hc), (1, L1), coming to rest at the end
+      const d0 = Hc / a, d1 = (L1 - Hc) / (1 - a), m = d1 > 0 ? (2 * d0 * d1) / (d0 + d1) : 0;
+      const herm = (u, p0, p1, v0, v1, h) => { const u2 = u * u, u3 = u2 * u; return (2 * u3 - 3 * u2 + 1) * p0 + (u3 - 2 * u2 + u) * h * v0 + (-2 * u3 + 3 * u2) * p1 + (u3 - u2) * h * v1; };
+      const rise = (e) => (e <= a ? herm(e / a, 0, Hc, d0, m, a) : herm((e - a) / (1 - a), Hc, L1, m, 0, 1 - a));
+      // where the turning lid needs more room than the rise gives: a swell, sin² shaped, big enough everywhere
+      let k = 0;
+      for (let i = 1; i < 40; i++) {
+        const u = i / 40, f = s(u), w = Math.sin(Math.PI * u) ** 2;
+        const short = need(T.tilt * f, T.slide * f, T.pad * f) + 0.3 * (1 - f) - rise(a + u * (1 - a));
+        if (short > 0 && w > 0.02) k = Math.max(k, short / w);
+      }
+      k = Math.min(k, 20);
+      const along = (e) => {
+        if (e <= a) return { lift: rise(e), tilt: 0, slide: 0, pad: 0 };
+        const u = (e - a) / (1 - a), f = s(u);
+        return { lift: rise(e) + k * Math.sin(Math.PI * u) ** 2, tilt: T.tilt * f, slide: T.slide * f, pad: T.pad * f };
+      };
+      // at an even pace: e is how far along the way (rise, slide, and the turn as the lid's edge sweeps it, 10 cm out),
+      // so the move's own soft start and stop are all the easing it has. (By the path's own measure, the lid
+      // crept up the walls, then swung off three times as fast.) Off the walls a little slower, as a snug lid comes
+      const N = 240, cum = [0];
+      let q0 = along(0);
+      for (let i = 1; i <= N; i++) {
+        const q = along(i / N), r = 10 * Math.PI / 180;
+        cum.push(cum[i - 1] + Math.hypot(q.lift - q0.lift, q.slide - q0.slide, (q.tilt - q0.tilt) * r, (q.pad - q0.pad) * r) * (1 + 0.35 * (1 - ss(a - 0.12, a + 0.12, i / N))));   // (the slower lift-off eases into the rest: no step in speed)
+        q0 = q;
+      }
+      const total = cum[N] || 1;
+      path = (e) => {
+        const want = Math.min(1, Math.max(0, e)) * total;
+        let i = 1; while (i < N && cum[i] < want) i++;
+        const f = cum[i] > cum[i - 1] ? (want - cum[i - 1]) / (cum[i] - cum[i - 1]) : 0;
+        return along((i - 1 + f) / N);
+      };
+    };
+    let last = '';
+    const keyAt = (e) => (e <= 1e-4 ? 'closed' : Object.values(path(Math.min(1, e))).map((x) => x.toFixed(4)).join());
     const lid = (e) => {
-      Object.assign(state.pb, e <= 0.001 ? { lid: 'closed' } : { lid: 'open', lidLift: T.lift * e, lidTilt: T.tilt * e, lidSlide: T.slide * e });
-      posePadBoxStudio(); deviceChanged();
+      if (!path) plan();
+      // (held still, before or after it moves: nothing to re-pose, and the floor shadow goes on settling)
+      const key = keyAt(e);
+      if (key === last) return;
+      last = key;
+      padbox.position.set(0, 0, 0);
+      if (e <= 1e-4) { Object.assign(state.pb, { lid: 'closed', padTilt: o0.padTilt }); posePadBox(padbox, state.pb); }
+      else {
+        const P = path(Math.min(1, e));
+        Object.assign(state.pb, { lid: 'open', lidLift: P.lift, lidTilt: P.tilt, lidSlide: P.slide, padTilt: P.pad });
+        posePadBox(padbox, { ...state.pb, lidExact: true });
+      }
+      deviceMoved();
     };
     const ui = () => { setSeg('pblid', state.pb.lid); pbSliders(); syncSetupUI(); };
-    const keep = { save: () => ({ ...state.pb }), restore: (o) => { Object.assign(state.pb, o); posePadBoxStudio(); deviceChanged(); ui(); }, done: ui };
+    // before the clock starts: the path planned, and the open box drawn once out of sight, so the first time the
+    // paper and the screen under it are drawn (their shaders built) doesn't freeze the move (about 0.7 s, as the lid
+    // first came off)
+    const prep = () => {
+      const was = { ...state.pb };
+      if (!path) plan();
+      const P = path(1);
+      posePadBox(padbox, { ...was, lid: 'open', lidLift: P.lift, lidTilt: P.tilt, lidSlide: P.slide, padTilt: P.pad, lidExact: true });
+      syncProxyParts(); renderMain();
+      Object.assign(state.pb, was); posePadBoxStudio(); syncProxyParts(); renderMain();
+      // (where the box is now, closed or in the open pose the path ends at: the first frame needn't re-pose it, nor
+      // start its floor shadow again)
+      last = was.lid === 'closed' ? 'closed' : was.lid === 'open' ? keyAt(1) : '';
+    };
+    const keep = { save: () => ({ ...state.pb }), restore: (o) => { Object.assign(state.pb, o); posePadBoxStudio(); deviceChanged(); ui(); }, done: ui, prep };
     return [
-      { key: 'pb-open', label: 'Lid lifts off', dur: 5, ...keep, note: 'The lid rises off the box and tips back to its open pose (the Lid sliders set where it ends).',
-        act: (t) => lid(t), at: (t) => ({ el: 8 * t, k: 1 + 0.08 * t }) },
-      { key: 'pb-look', label: 'Open & look in', dur: 8, ...keep, note: 'The lid lifts off, then the camera rises to look into the box.',
-        act: (t) => lid(ss(0, 0.55, t)), at: (t) => { const u = ss(0.4, 1, t); return { el: 35 * u, k: 1 + 0.1 * u }; } },
-      { key: 'pb-close', label: 'Lid goes on', dur: 5, ...keep, note: 'From open, the lid comes down onto the box.',
-        act: (t) => lid(1 - t), at: (t) => ({ el: 8 * (1 - t), k: 1 + 0.08 * (1 - t) }) },
+      { key: 'pb-open', label: 'Lid lifts off', dur: 6, ...keep, note: 'The lid slides up off the box, then tips back to its open pose (the Lid sliders set where it ends).',
+        act: (t) => lid(sw(0.06, 0.9, t)), at: (t) => { const u = sw(0, 1, t); return { el: 8 * u, k: 1 + 0.1 * u }; } },
+      { key: 'pb-look', label: 'Open & look in', dur: 9, ...keep, note: 'The lid comes off, then the camera rises to look into the box.',
+        act: (t) => lid(sw(0.04, 0.55, t)), at: (t) => { const u = sw(0.3, 1, t); return { el: 35 * u, k: 1 + 0.12 * u }; } },
+      { key: 'pb-close', label: 'Lid goes on', dur: 6, ...keep, note: 'From open, the lid comes back over the box and slides down onto it.',
+        act: (t) => lid(1 - sw(0.08, 0.94, t)), at: (t) => { const u = sw(0, 1, t); return { el: 8 * (1 - u), k: 1 + 0.1 * (1 - u) }; } },
     ];
   }
   if (isScale()) {   // the scale: its display counting up to the reading, as someone steps on
@@ -2495,7 +2586,7 @@ function deviceMoves() {
         if (t < 0.7) { const u = (t - 0.08) / 0.62; return show((num * (1 - Math.pow(1 - u, 3))).toFixed(dec)); }
         if (t < 0.88) return show(Math.floor((t - 0.7) / 0.045) % 2 ? '' : text);
         show(text);
-      }, at: (t) => ({ el: 5 * t, k: 1 - 0.06 * t }) }];
+      }, at: (t) => { const u = sw(0, 1, t); return { el: 5 * u, k: 1 - 0.06 * u }; } }];
   }
   if (isBP()) {   // the blood pressure monitor: the cuff pumps up, lets down, and the reading appears
     const R = { ...BPM.reading }, sys = parseInt(R.sys, 10);
@@ -2508,14 +2599,14 @@ function deviceMoves() {
         if (t < 0.45) return show({ ...R, sys: String(Math.round(peak * ss(0.06, 0.45, t))), dia: '', pulse: '' });
         if (t < 0.82) return show({ ...R, sys: String(Math.round(peak - (peak - low) * ((t - 0.45) / 0.37))), dia: '', pulse: '' });   // (letting down past the systolic towards the diastolic)
         show(R);
-      }, at: (t) => ({ el: 4 * t, k: 1 - 0.06 * t }) }];
+      }, at: (t) => { const u = sw(0, 1, t); return { el: 4 * u, k: 1 - 0.06 * u }; } }];
   }
   if (isGluco()) {   // the glucometer: counts down as it reads the strip, then the result
     const R = { ...GLM.reading }, show = (r) => { setGlucoReading(GLM, r); requestRender(); };
     return [{ key: 'gl-measure', label: 'Measuring', dur: 6, note: 'It counts down from 5 as it reads the strip, then shows the result.',
       save: () => ({ ...GLM.reading }), restore: (r) => show(r),
       act: (t) => show(t < 0.72 ? { ...R, value: String(Math.max(1, 5 - Math.floor(t / 0.144))) } : R),
-      at: (t) => ({ el: 4 * t, k: 1 - 0.06 * t }) }];
+      at: (t) => { const u = sw(0, 1, t); return { el: 4 * u, k: 1 - 0.06 * u }; } }];
   }
   return [];
 }
