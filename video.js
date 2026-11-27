@@ -395,6 +395,7 @@ export function initVideo(ctx) {
     $('#vid-info').innerHTML = `<span class="num">${W} × ${H}<small>px</small></span>${fmt.label === 'PNG seq.' ? 'PNG sequence' : fmt.label} · ${fpsText}${L ? ` · ${L.toFixed(1)} s` : ''}${alphaOn() ? ' · transparent' : ''}`;
     $('#vid-preview').disabled = mine && !take;
     btnState();
+    summarise();
   }
   function btnState() { $('#vid-download').disabled = busy || (v.motion === 'mine' && (!take || !!rec)); }
 
@@ -435,10 +436,39 @@ export function initVideo(ctx) {
   renderer.domElement.addEventListener('pointerdown', () => stopPlay());
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (rec) stopRec(); stopPlay(); } });
 
+  // Image or Video: one Export section shows the chosen one's settings, and the footer only its Download
+  const outBtns = document.querySelectorAll('#out-mode [data-out]');
+  function setOut(mode) {
+    document.body.dataset.out = mode;
+    outBtns.forEach((b) => { const on = b.dataset.out === mode; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+    if (mode !== 'video') { if (rec) stopRec(); stopPlay(); }
+  }
+  outBtns.forEach((b) => b.addEventListener('click', () => setOut(b.dataset.out)));
+  setOut('image');
+
+  // the folded settings say what they're set to on their one line, kept current whatever changes them
+  const shown = (el) => el && !el.closest('.hidden');
+  const onText = (sel) => document.querySelector(`${sel} button.on`)?.textContent.trim();
+  function summarise() {
+    const move = [];
+    if (shown($('#vid-angle-row'))) move.push($('#vid-angle-v').textContent);
+    move.push(`${v.dur} s`);
+    if (shown($('#vid-smooth-row'))) move.push(onText('[data-vseg="smooth"]'));
+    if (shown($('#vid-dir-row'))) move.push(onText('[data-vseg="dir"]'));
+    const [W, H] = videoSize(), fmt = FORMATS[v.format];
+    const file = [fmt.label, `${W} × ${H}`, v.format === 'gif' ? `${Math.round(1000 / gifDelay())} fps` : `${v.fps} fps`];
+    if (alphaOn()) file.push('transparent');
+    for (const [id, parts] of [['#vid-move-sum', move], ['#vid-file-sum', file]]) {
+      const t = parts.filter(Boolean).join(' · ');
+      if ($(id).textContent !== t) $(id).textContent = t;
+    }
+  }
+
   function setAvailable(on) {
     sec.classList.toggle('hidden', !on);
     $('#vid-export-row').classList.toggle('hidden', !on);
-    if (!on) { if (rec) stopRec(); stopPlay(); }
+    $('#out-mode').classList.toggle('hidden', !on);
+    if (!on) setOut('image');
   }
   refresh();
   return { tick, refresh, setAvailable, busy: () => busy, playing: () => !!play || !!rec };

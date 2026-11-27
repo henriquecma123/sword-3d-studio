@@ -476,3 +476,32 @@ select {
 #vid-matte-row .swatches { display: flex; align-items: center; gap: 6px; }
 #vid-matte-row .swatches button { width: 22px; height: 22px; }
 #vid-matte-row .color-pick { width: 22px; height: 22px; }
+
+/* ---------- Export: Image or Video by the title, then only the chosen one's settings and Download ---------- */
+#out-mode { font-family: var(--sans); letter-spacing: 0; }
+#out-mode button { padding: 5px 12px; }
+#out-mode .beta { margin-left: 3px; font-size: 10px; font-weight: 500; color: var(--grey-600); }
+body:not([data-out="video"]) #video-section, body:not([data-out="video"]) #vid-export-row { display: none !important; }
+body[data-out="video"] #img-opts, body[data-out="video"] #img-export-row { display: none; }
+#video-section { margin-top: 16px; }
+#video-section > .vid-block:first-of-type { margin-top: 14px; }
+#vid-export-row { padding-top: 0; border-top: 0; }
+/* the less-used settings, folded to one line that says what they're set to; tap to change them */
+.fold { margin-top: 14px; border-top: 1px solid var(--grey-200); }
+.fold summary {
+  list-style: none; display: flex; align-items: center; gap: 12px; padding: 12px 0 0; cursor: pointer;
+  font-size: 13.5px; color: var(--grey-800); -webkit-user-select: none; user-select: none;
+}
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 6px; }
+.fold-l { white-space: nowrap; }
+.fold-v { flex: 1; min-width: 0; text-align: right; font-size: 12.5px; color: var(--grey-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.fold summary::after {
+  content: ''; flex: none; width: 6px; height: 6px; margin: -3px 2px 0 0; border: solid var(--grey-700); border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg); transition: transform .15s;
+}
+.fold[open] summary::after { transform: rotate(-135deg); margin-top: 3px; }
+.fold[open] .fold-v { visibility: hidden; }
+.fold summary:hover .fold-l { color: var(--grey-900); }
+.fold-body { padding-bottom: 2px; }
+.fold-body > .slider:first-child, .fold-body > #vid-format { margin-top: 12px; }

@@ -560,8 +560,14 @@
         <label class="check" id="transparent-row"><input type="checkbox" id="transparent" /> Transparent background <span class="sub">PNG only</span></label>
       </section>
 
-      <section>
-        <h2>Export</h2>
+      <!-- one Export section: Image or Video (the shared Aspect, then only the chosen one's settings; the footer follows) -->
+      <section id="export-section">
+        <h2>Export
+          <div class="seg small hidden" id="out-mode" role="tablist" aria-label="What to export">
+            <button data-out="image" class="on" role="tab" aria-selected="true">Image</button>
+            <button data-out="video" role="tab" aria-selected="false">Video <span class="beta">Beta</span></button>
+          </div>
+        </h2>
         <div class="row">
           <label>Aspect</label>
           <div class="seg small" data-seg="aspect">
@@ -573,6 +579,7 @@
             <button data-value="9:16">9:16</button>
           </div>
         </div>
+        <div id="img-opts">
         <div class="row">
           <label for="resolution">Size</label>
           <div class="select"><select id="resolution">
@@ -589,10 +596,9 @@
             <button data-value="jpg">JPG</button>
           </div>
         </div>
-      </section>
+        </div>
 
-      <section id="video-section" class="hidden">
-        <h2>Video <span class="sub">Beta</span></h2>
+        <div id="video-section" class="hidden">
         <div class="seg wide" data-vmode>
           <button data-value="preset" class="on">Ready-made</button>
           <button data-value="mouse">Record with mouse</button>
@@ -607,6 +613,9 @@
           <h3 class="vid-head">Camera</h3>
           <div class="chips" id="vid-cam-chips"></div>
           <p class="note" id="vid-note"></p>
+          <details class="fold" id="vid-move-fold">
+          <summary><span class="fold-l">Movement</span><span class="fold-v" id="vid-move-sum"></span></summary>
+          <div class="fold-body">
           <div class="slider" id="vid-angle-row"><label for="vid-angle"><span id="vid-angle-l">Turn</span> <span id="vid-angle-v"></span></label><input id="vid-angle" type="range" min="10" max="720" step="5" /></div>
           <div class="slider" id="vid-dur-row"><label for="vid-dur">Length <span id="vid-dur-v"></span></label><input id="vid-dur" type="range" min="2" max="20" step="0.5" /></div>
           <div class="row" id="vid-smooth-row">
@@ -624,6 +633,8 @@
               <button data-value="1" class="on">Right</button>
             </div>
           </div>
+          </div>
+          </details>
         </div>
 
         <!-- record with the mouse -->
@@ -634,8 +645,9 @@
         </div>
 
         <!-- the file -->
-        <div class="vid-block">
-          <h3 class="vid-head">Output</h3>
+        <details class="fold" id="vid-file-fold">
+          <summary><span class="fold-l">File</span><span class="fold-v" id="vid-file-sum"></span></summary>
+          <div class="fold-body">
           <div class="seg wide small" data-vseg="format" id="vid-format"></div>
           <p class="note" id="vid-format-note"></p>
           <div class="row">
@@ -656,12 +668,14 @@
             <label for="vid-matte" title="The colour of the slide or page the GIF goes on: the edges blend into it">Slide colour</label>
             <div class="swatches small"><button data-matte="#ffffff" title="White" aria-label="White" style="background:#ffffff"></button><button data-matte="#f3f3f3" title="Grey 100" aria-label="Grey 100" style="background:#f3f3f3"></button><button data-matte="#e8e8e8" title="Grey 200" aria-label="Grey 200" style="background:#e8e8e8"></button><button data-matte="#2e2e2e" title="Grey 800" aria-label="Grey 800" style="background:#2e2e2e"></button><button data-matte="#0d0d0d" title="Grey 900" aria-label="Grey 900" style="background:#0d0d0d"></button><label class="color-pick" title="Another colour"><input type="color" id="vid-matte" value="#ffffff" aria-label="Slide colour" /></label></div>
           </div>
+          </div>
+        </details>
         </div>
       </section>
     </div>
 
     <footer class="export-bar">
-      <div class="export-row">
+      <div class="export-row" id="img-export-row">
         <div class="export-info" id="export-info"></div>
         <button class="primary" id="download">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0-4-4m4 4 4-4M4 16h12" /></svg>
