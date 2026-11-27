@@ -110,6 +110,10 @@
               <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M5 22.5C11 21 16 13 25 9.5S41 6 41.5 13.5 37 26.5 33.5 26.5" class="d-bp-tail" /><ellipse cx="24" cy="26.5" rx="10" ry="5.2" class="d-bp-pod" /><circle cx="5.6" cy="22.3" r="1.6" class="d-bp-end" /></svg>
               <span>Pelvic Health Pod</span>
             </button>
+            <button data-value="travelbag" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="6.5" y="11" width="35" height="20" rx="5.5" class="d-body" /><path d="M10.5 11.4C16 9.6 32 9.6 37.5 11.4" class="d-line" /><path d="M41.2 16.5V24.5" class="d-line" /><rect x="40.2" y="22.5" width="2.4" height="5.5" rx="1" class="d-cap" /><circle cx="21" cy="21" r="1.3" class="d-line" /><path d="M23.6 21H28.5" class="d-line" /></svg>
+              <span>Travel bag</span>
+            </button>
             <button data-value="box" role="radio">
               <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M24 4.5 39.5 10.5V25.5L24 31.5 8.5 25.5V10.5Z" class="d-body" /><path d="M24 4.5 39.5 10.5 24 16.5 8.5 10.5Z" class="d-cap" /><path d="M24 16.5V31.5" class="d-line" /></svg>
               <span>Band Box</span>
@@ -273,6 +277,7 @@
             <button data-value="lying" title="Lying on its back, face up">Lying flat</button>
           </div>
         </div>
+        <div class="slider hidden" id="tb-open-row"><label for="tb-open" title="The zip: from closed to all the way open">Opening <span id="tb-open-v"></span></label><input id="tb-open" type="range" min="0" max="1" step="0.005" value="0" /></div>
         <div class="slider hidden" id="gl-lean-row"><label for="gl-lean" title="How far it leans back (or, below 0, forward) as it stands">Lean <span id="gl-lean-v"></span></label><input id="gl-lean" type="range" min="-25" max="35" step="0.5" value="10" /></div>
         <div class="row hidden" id="gl-strip-row">
           <label>Strip</label>
@@ -588,59 +593,69 @@
 
       <section id="video-section" class="hidden">
         <h2>Video <span class="sub">Beta</span></h2>
-        <div class="row">
-          <label>Movement</label>
-          <div class="seg small" data-vmode>
-            <button data-value="preset" class="on">Ready-made</button>
-            <button data-value="mouse">Record with mouse</button>
+        <div class="seg wide" data-vmode>
+          <button data-value="preset" class="on">Ready-made</button>
+          <button data-value="mouse">Record with mouse</button>
+        </div>
+
+        <!-- ready-made: the device's own moves, then the camera's; the chosen one's settings under them -->
+        <div class="vid-block" id="vid-presets">
+          <div id="vid-dev-group">
+            <h3 class="vid-head"><span id="vid-dev-name">This device</span></h3>
+            <div class="chips" id="vid-dev-chips"></div>
+          </div>
+          <h3 class="vid-head">Camera</h3>
+          <div class="chips" id="vid-cam-chips"></div>
+          <p class="note" id="vid-note"></p>
+          <div class="slider" id="vid-angle-row"><label for="vid-angle"><span id="vid-angle-l">Turn</span> <span id="vid-angle-v"></span></label><input id="vid-angle" type="range" min="10" max="720" step="5" /></div>
+          <div class="slider" id="vid-dur-row"><label for="vid-dur">Length <span id="vid-dur-v"></span></label><input id="vid-dur" type="range" min="2" max="20" step="0.5" /></div>
+          <div class="row" id="vid-smooth-row">
+            <label>Speed</label>
+            <div class="seg small" data-vseg="smooth">
+              <button data-value="2" class="on" title="Starts very slowly, speeds up, and settles very slowly">Strong ease</button>
+              <button data-value="1" title="Starts and ends a little slowly">Gentle</button>
+              <button data-value="0" title="The same speed throughout: loops seamlessly">Steady</button>
+            </div>
+          </div>
+          <div class="row" id="vid-dir-row">
+            <label>Direction</label>
+            <div class="seg small" data-vseg="dir">
+              <button data-value="-1">Left</button>
+              <button data-value="1" class="on">Right</button>
+            </div>
           </div>
         </div>
-        <div class="row" id="vid-motion-row">
-          <label for="vid-motion">Type</label>
-          <div class="select"><select id="vid-motion"></select></div>
+
+        <!-- record with the mouse -->
+        <div class="vid-block hidden" id="vid-mine">
+          <p class="note" id="vid-mine-note"></p>
+          <div class="chips vid-rec" id="vid-rec-row"><button id="vid-rec"><span class="rec-dot"></span>Record</button></div>
+          <p class="note" id="vid-take-info"></p>
         </div>
-        <p class="note" id="vid-note"></p>
-        <div class="slider" id="vid-angle-row"><label for="vid-angle"><span id="vid-angle-l">Turn</span> <span id="vid-angle-v"></span></label><input id="vid-angle" type="range" min="10" max="720" step="5" /></div>
-        <div class="slider" id="vid-dur-row"><label for="vid-dur">Length <span id="vid-dur-v"></span></label><input id="vid-dur" type="range" min="2" max="20" step="0.5" /></div>
-        <div class="row" id="vid-smooth-row">
-          <label>Speed</label>
-          <div class="seg small" data-vseg="smooth">
-            <button data-value="2" class="on" title="Starts very slowly, speeds up, and settles very slowly">Strong ease</button>
-            <button data-value="1" title="Starts and ends a little slowly">Gentle ease</button>
-            <button data-value="0" title="The same speed throughout: loops seamlessly">Steady</button>
+
+        <!-- the file -->
+        <div class="vid-block">
+          <h3 class="vid-head">Output</h3>
+          <div class="seg wide small" data-vseg="format" id="vid-format"></div>
+          <p class="note" id="vid-format-note"></p>
+          <div class="row">
+            <label for="vid-size">Size</label>
+            <div class="select"><select id="vid-size"></select></div>
           </div>
-        </div>
-        <div class="row" id="vid-dir-row">
-          <label>Direction</label>
-          <div class="seg small" data-vseg="dir">
-            <button data-value="-1">Left</button>
-            <button data-value="1" class="on">Right</button>
+          <div class="row">
+            <label>Frame rate</label>
+            <div class="seg small" data-vseg="fps">
+              <button data-value="25">25</button>
+              <button data-value="29.97" class="on">29.97</button>
+              <button data-value="30">30</button>
+              <button data-value="60">60</button>
+            </div>
           </div>
-        </div>
-        <div class="chips vid-rec" id="vid-rec-row"><button id="vid-rec"><span class="rec-dot"></span>Record</button></div>
-        <p class="note" id="vid-take-info"></p>
-        <div class="row">
-          <label for="vid-size">Size</label>
-          <div class="select"><select id="vid-size"></select></div>
-        </div>
-        <div class="row">
-          <label>Frame rate</label>
-          <div class="seg small" data-vseg="fps">
-            <button data-value="25">25</button>
-            <button data-value="29.97" class="on">29.97</button>
-            <button data-value="30">30</button>
-            <button data-value="60">60</button>
+          <label class="check" id="vid-transparent-row"><input type="checkbox" id="vid-transparent" /> Transparent background <span class="sub" id="vid-transparent-sub"></span></label>
+          <div class="row hidden" id="vid-matte-row">
+            <label for="vid-matte" title="The colour of the slide or page the GIF goes on: the edges blend into it">Slide colour</label>
+            <div class="swatches small"><button data-matte="#ffffff" title="White" aria-label="White" style="background:#ffffff"></button><button data-matte="#f3f3f3" title="Grey 100" aria-label="Grey 100" style="background:#f3f3f3"></button><button data-matte="#e8e8e8" title="Grey 200" aria-label="Grey 200" style="background:#e8e8e8"></button><button data-matte="#2e2e2e" title="Grey 800" aria-label="Grey 800" style="background:#2e2e2e"></button><button data-matte="#0d0d0d" title="Grey 900" aria-label="Grey 900" style="background:#0d0d0d"></button><label class="color-pick" title="Another colour"><input type="color" id="vid-matte" value="#ffffff" aria-label="Slide colour" /></label></div>
           </div>
-        </div>
-        <div class="row">
-          <label>Format</label>
-          <div class="seg small" data-vseg="format" id="vid-format"></div>
-        </div>
-        <p class="note" id="vid-format-note"></p>
-        <label class="check" id="vid-transparent-row"><input type="checkbox" id="vid-transparent" /> Transparent background <span class="sub" id="vid-transparent-sub"></span></label>
-        <div class="row hidden" id="vid-matte-row">
-          <label for="vid-matte" title="The colour of the slide or page the GIF goes on: the edges blend into it">Slide colour</label>
-          <div class="swatches small"><button data-matte="#ffffff" title="White" aria-label="White" style="background:#ffffff"></button><button data-matte="#f3f3f3" title="Grey 100" aria-label="Grey 100" style="background:#f3f3f3"></button><button data-matte="#e8e8e8" title="Grey 200" aria-label="Grey 200" style="background:#e8e8e8"></button><button data-matte="#2e2e2e" title="Grey 800" aria-label="Grey 800" style="background:#2e2e2e"></button><button data-matte="#0d0d0d" title="Grey 900" aria-label="Grey 900" style="background:#0d0d0d"></button><label class="color-pick" title="Another colour"><input type="color" id="vid-matte" value="#ffffff" aria-label="Slide colour" /></label></div>
         </div>
       </section>
     </div>

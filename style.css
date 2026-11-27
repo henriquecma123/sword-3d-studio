@@ -462,7 +462,17 @@ select {
 #rec-badge .rec-dot { animation: rec-blink 1s steps(2) infinite; }
 #rec-badge #vid-rec-time { margin-left: 4px; color: var(--grey-800); font-weight: 500; }
 @keyframes rec-blink { 50% { opacity: .25; } }
-#vid-take-info:empty, #vid-note:empty { display: none; }
+#vid-take-info:empty, #vid-note:empty, #vid-mine-note:empty, #vid-format-note:empty { display: none; }
+/* the video section, in blocks: what moves (the device's own moves, the camera's) and the file it makes */
+.vid-block { margin-top: 16px; }
+.vid-block + .vid-block { padding-top: 14px; border-top: 1px solid var(--grey-200); }
+.vid-head { margin: 0 0 8px; font: 600 11px/1.2 Figtree, -apple-system, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: var(--grey-600); }
+.vid-head + .chips + .vid-head, #vid-dev-group + .vid-head { margin-top: 12px; }
+#vid-presets .chips { margin-bottom: 0; }
+#vid-dev-chips button { border-color: var(--grey-300); }
+#vid-presets .note { margin-top: 10px; }
+#vid-format { margin-bottom: 2px; }
+#vid-format-note { margin-bottom: 2px; }
 #vid-matte-row .swatches { display: flex; align-items: center; gap: 6px; }
 #vid-matte-row .swatches button { width: 22px; height: 22px; }
 #vid-matte-row .color-pick { width: 22px; height: 22px; }

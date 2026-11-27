@@ -13,7 +13,9 @@ const easeGentle = (t) => (1 - Math.cos(Math.PI * t)) / 2;
 const TAU = Math.PI * 2;
 
 // Each movement turns the camera round the device (round the vertical axis through its centre, and over it), keeping
-// the framing you set: where the device sits in the shot stays where it is. at(t) gives, for t from 0 to 1 over the
+// the framing you set: where the device sits in the shot stays where it is. Besides these, a device can have moves of
+// its own (ctx.deviceMoves(): the travel bag unzipping, the Pad Box's lid lifting, a display counting up...): the same
+// shape, plus act(t), which sets the device at t, and save / restore / done for how it was and how it ended. at(t) gives, for t from 0 to 1 over the
 // video: az (degrees round), el (degrees over), k (distance, 1 = as now). `angle` is the movement's own slider (its
 // label, range and default here); `dir` +1 right / -1 left.
 export const MOTIONS = {
@@ -40,6 +42,7 @@ export const MOTIONS = {
     at: (t, a) => ({ az: (a / 2) * Math.sin(TAU * t), el: (a / 4) * Math.sin(2 * TAU * t) }) },
   mine: { label: 'Record with mouse', note: 'Press Record, then move the device with the mouse as you normally do: drag to turn, scroll to zoom, right-drag to pan. Press Stop when you are done, then Download video.' },
 };
+const CAMERA_MOVES = Object.keys(MOTIONS).filter((k) => k !== 'mine');
 
 const SIZES = [[1280, '720p · 1280 px'], [1920, 'HD · 1920 px'], [2560, '2K · 2560 px'], [3840, '4K · 3840 px']];
 const GIF_SIZES = [[640, '640 px'], [960, '960 px'], [1280, '1280 px'], [1920, 'HD · 1920 px']];
@@ -52,6 +55,10 @@ export const FORMATS = {
   gif: { label: 'GIF', ext: 'gif', alpha: true, note: 'For Google Slides, Slack, email and docs, up to 1920 px. 256 colours, finely dithered.' },
 };
 const MAX_TAKE = 30;                      // s, the longest recording
+// a breath between frames, so the page stays responsive (Cancel works) and the encoder can catch up: a message to
+// itself, not a timer, since a browser holds a background tab's timers to one a second (an export left running in
+// another tab crawled at a frame a second)
+const breathe = () => new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = () => { ch.port1.close(); r(); }; ch.port2.postMessage(0); });
 const MAX_FRAMES = 60 * 30;               // a video never has more frames than this
 
 export function initVideo(ctx) {
@@ -59,6 +66,11 @@ export function initVideo(ctx) {
   const sec = $('#video-section');
   const v = { motion: 'turntable', angle: 360, dir: 1, dur: 8, size: 1920, gifSize: 1280, matte: '#ffffff', fps: '29.97', smooth: 2, lastPreset: 'turntable', format: 'mp4', transparent: false };
   const angleMem = {};                    // each movement keeps its own angle
+  const durMem = {};                      // and its own length
+  // the device's own moves (fresh from the app each time: they capture where the device is when they start)
+  const devMoves = () => (ctx.deviceMoves ? ctx.deviceMoves() : []);
+  const motionOf = (k, list = devMoves()) => MOTIONS[k] || list.find((m) => m.key === k) || MOTIONS.turntable;
+  const isDevMove = (k) => !MOTIONS[k];
   let take = null;                        // the recording: [{t, p:[x,y,z], q:[x,y,z], f}]
   let rec = null;                         // recording now: { t0, samples }
   let play = null;                        // previewing in the view: { t0, base }
@@ -89,8 +101,10 @@ export function initVideo(ctx) {
   // the camera and the point it looks at turned together round the device's centre: over it (round the camera's
   // horizontal), then round the vertical; then moved along the view line for the distance
   const _q = new THREE.Quaternion(), _qy = new THREE.Quaternion(), _p = new THREE.Vector3(), _t = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0);
-  function poseAt(t, base) {
-    const o = MOTIONS[v.motion].at(v.smooth === 2 ? easeStrong(t) : v.smooth === 1 ? easeGentle(t) : t, v.angle, v.dir);
+  function poseAt(t, base, m = motionOf(v.motion)) {
+    const e = v.smooth === 2 ? easeStrong(t) : v.smooth === 1 ? easeGentle(t) : t;
+    if (m.act) m.act(e);   // (a device's own move: the device first, then the camera with it)
+    const o = m.angle ? m.at(e, v.angle, v.dir) : m.at(e);
     // never past straight above, nor under the floor (no lower than your view, or 3° above the floor)
     const over = THREE.MathUtils.clamp(o.el ?? 0, Math.min(0, 3 - base.el), Math.max(0, 85 - base.el));
     _q.setFromAxisAngle(base.right, -over * DEG);
@@ -130,10 +144,10 @@ export function initVideo(ctx) {
     if (play) {
       const s = (performance.now() - play.t0) / 1000, L = length();
       if (!L || s >= L) {   // the end: stays there
-        if (v.motion === 'mine') takeAt(L); else poseAt(1, play.base);
+        if (v.motion === 'mine') takeAt(L); else poseAt(1, play.base, play.move);
         ctx.cameraMoved(); stopPlay(); return;
       }
-      if (v.motion === 'mine') takeAt(s); else poseAt(s / L, play.base);
+      if (v.motion === 'mine') takeAt(s); else poseAt(s / L, play.base, play.move);
       ctx.cameraMoved();
     }
   }
@@ -165,13 +179,14 @@ export function initVideo(ctx) {
     if (busy || rec) return;
     if (v.motion === 'mine' && !take) return;
     stopPlay();
-    play = { t0: performance.now(), base: baseView() };
+    play = { t0: performance.now(), base: baseView(), move: v.motion === 'mine' ? null : motionOf(v.motion) };
     controls.enabled = false;
     $('#vid-preview').innerHTML = '■ Stop';
   }
-  function stopPlay() {   // the camera stays where the preview got to
+  function stopPlay() {   // the camera (and the device, for its own moves) stays where the preview got to
     if (!play) return;
-    const start = play.base; play = null;
+    const start = play.base, move = play.move; play = null;
+    move?.done?.();
     controls.enabled = true;
     controls.update();
     anchor = { start, key: poseKey() };
@@ -218,7 +233,7 @@ export function initVideo(ctx) {
         try { enc.encode(vf, { keyFrame: i % key === 0 }); } finally { vf.close(); }
         i++;
         // don't run ahead of the encoder (it holds every frame it hasn't finished in memory)
-        while (enc.encodeQueueSize > 3 && !err) await new Promise((res) => setTimeout(res, 4));
+        while (enc.encodeQueueSize > 3 && !err) await breathe();
       },
       get bytes() { return bytes; },
       async finishAsync() { await enc.flush(); if (err) throw err; muxer.finalize(); return new Blob([target.buffer], { type: 'video/mp4' }); },
@@ -235,9 +250,10 @@ export function initVideo(ctx) {
     const fmt = FORMATS[v.format], alpha = alphaOn(), [W, H] = videoSize();
     const fps = v.format === 'gif' ? 1000 / gifDelay() : fpsNum();
     const frames = Math.min(MAX_FRAMES, Math.max(2, Math.round(L * fps)));
-    const m = MOTIONS[v.motion];
+    const m = v.motion === 'mine' ? MOTIONS.mine : motionOf(v.motion);
     // a steady loop's last frame would be its first again: stop one short, so it repeats without a stutter
     const loops = v.smooth === 0 && v.motion !== 'mine' && m.loop && !(v.motion === 'turntable' && v.angle % 360);
+    const devSaved = m.save ? m.save() : undefined;
     const subject = `${ctx.subject()}_video_${v.motion === 'mine' ? 'my-movement' : v.motion}_${L.toFixed(0)}s_${W}x${H}_${v.format === 'gif' ? Math.round(fps) : v.fps}fps${alpha ? '_transparent' : ''}`;
 
     busy = true; cancel = false;
@@ -260,11 +276,11 @@ export function initVideo(ctx) {
       const out = document.createElement('canvas'); out.width = W; out.height = H;
       const octx = out.getContext('2d', { alpha, willReadFrequently: v.format === 'gif' });
       octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
-      const at = (t) => { if (v.motion === 'mine') takeAt(t * L); else poseAt(t, base); };
+      const at = (t) => { if (v.motion === 'mine') takeAt(t * L); else poseAt(t, base, m); };
       if (writer.setPalette) {   // the GIF's colours, from five frames across the movement
         ctx.busyText('Choosing the GIF\'s colours…');
         const samples = [];
-        for (const t of [0, 0.25, 0.5, 0.75, 1]) { at(t); ctx.renderFrame(octx, W, H, alpha); samples.push(octx.getImageData(0, 0, W, H).data); await new Promise((r) => setTimeout(r, 0)); }
+        for (const t of [0, 0.25, 0.5, 0.75, 1]) { at(t); ctx.renderFrame(octx, W, H, alpha); samples.push(octx.getImageData(0, 0, W, H).data); await breathe(); }
         writer.setPalette(samples);
       }
       for (let i = 0; i < frames; i++) {
@@ -275,10 +291,10 @@ export function initVideo(ctx) {
         await writer.add(out);
         const mb = writer.bytes / 1e6;
         ctx.busyText(`Rendering video ${Math.round(((i + 1) / frames) * 100)}%${mb >= 1 ? ` · ${mb < 1000 ? Math.round(mb) + ' MB' : (mb / 1000).toFixed(1) + ' GB'}` : ''}`);
-        await new Promise((r) => setTimeout(r, 0));
+        await breathe();
       }
       ctx.busyText('Finishing the file…');
-      await new Promise((r) => setTimeout(r, 0));
+      await breathe();
       const blob = writer.finishAsync ? await writer.finishAsync() : writer.finish();
       if (cancel) throw new Error('cancelled');
       const a = document.createElement('a');
@@ -292,6 +308,7 @@ export function initVideo(ctx) {
       writer = null;
       if (prev) ctx.endFrames(prev);
       if (shadowWas !== null) ctx.setShadow(shadowWas);
+      if (m.restore) m.restore(devSaved);   // (the device as it was before the video)
       restore(home);
       controls.enabled = true;
       if (homeAnchor) anchor = { start: homeAnchor.start, key: poseKey() };
@@ -304,8 +321,19 @@ export function initVideo(ctx) {
   }
 
   // ---------------------------------------------------------------- panel
-  const motionSel = $('#vid-motion'), angleEl = $('#vid-angle'), durEl = $('#vid-dur'), sizeSel = $('#vid-size');
-  motionSel.innerHTML = Object.entries(MOTIONS).filter(([k]) => k !== 'mine').map(([k, m]) => `<option value="${k}">${m.label}</option>`).join('');
+  const angleEl = $('#vid-angle'), durEl = $('#vid-dur'), sizeSel = $('#vid-size');
+  const chip = (k, m) => `<button data-move="${k}" title="${(m.note || '').replace(/"/g, '&quot;')}">${m.label}</button>`;
+  $('#vid-cam-chips').innerHTML = CAMERA_MOVES.map((k) => chip(k, MOTIONS[k])).join('');
+  let devSig = null;
+  function fillDeviceChips() {   // the device's own moves, as chips over the camera's (none: no group)
+    const list = devMoves(), sig = (ctx.deviceName ? ctx.deviceName() : '') + list.map((m) => m.key).join();
+    if (sig === devSig) return list;
+    devSig = sig;
+    $('#vid-dev-chips').innerHTML = list.map((m) => chip(m.key, m)).join('');
+    $('#vid-dev-name').textContent = ctx.deviceName ? ctx.deviceName() : 'This device';
+    $('#vid-dev-group').classList.toggle('hidden', !list.length);
+    return list;
+  }
   let sizesFor = '';
   function fillSizes() {
     const gif = v.format === 'gif';
@@ -317,28 +345,35 @@ export function initVideo(ctx) {
   $('#vid-format').innerHTML = Object.entries(FORMATS).map(([k, f]) => `<button data-value="${k}">${f.label}</button>`).join('');
   function info(text) { $('#vid-take-info').textContent = text; }
   function refresh() {
-    const m = MOTIONS[v.motion], mine = v.motion === 'mine';
-    $('#vid-note').textContent = m.note;
-    $('#vid-angle-row').classList.toggle('hidden', mine);
-    $('#vid-dur-row').classList.toggle('hidden', mine);
+    const list = fillDeviceChips();
+    // a device's move the new device doesn't have: back to the turntable
+    if (v.motion !== 'mine' && isDevMove(v.motion) && !list.some((d) => d.key === v.motion)) { setMotion('turntable'); return; }
+    if (v.motion !== 'mine' && isDevMove(v.lastPreset) && !list.some((d) => d.key === v.lastPreset)) v.lastPreset = 'turntable';
+    const mine = v.motion === 'mine', m = mine ? MOTIONS.mine : motionOf(v.motion, list);
+    $('#vid-presets').classList.toggle('hidden', mine);
+    $('#vid-mine').classList.toggle('hidden', !mine);
+    $('#vid-note').textContent = mine ? '' : m.note;
+    $('#vid-mine-note').textContent = MOTIONS.mine.note;
+    document.querySelectorAll('[data-move]').forEach((b) => b.classList.toggle('on', b.dataset.move === v.motion));
+    $('#vid-angle-row').classList.toggle('hidden', mine || !m.angle);
     $('#vid-dir-row').classList.toggle('hidden', mine || !m.dir);
-    $('#vid-rec-row').classList.toggle('hidden', !mine);
     if (!mine) {
-      Object.assign(angleEl, { min: m.angle.min, max: m.angle.max, step: m.angle.step });
-      angleEl.value = v.angle;
-      $('#vid-angle-l').textContent = m.angle.label;
-      $('#vid-angle-v').textContent = `${v.angle}${m.angle.unit || '°'}`;
+      if (m.angle) {
+        Object.assign(angleEl, { min: m.angle.min, max: m.angle.max, step: m.angle.step });
+        angleEl.value = v.angle;
+        $('#vid-angle-l').textContent = m.angle.label;
+        $('#vid-angle-v').textContent = `${v.angle}${m.angle.unit || '°'}`;
+        ctx.paintRange(angleEl);
+      }
       durEl.value = v.dur; $('#vid-dur-v').textContent = `${v.dur} s`;
-      ctx.paintRange(angleEl); ctx.paintRange(durEl);
+      ctx.paintRange(durEl);
     } else if (take && !rec) info(`Recorded: ${take.length.toFixed(1)} s`);
     else if (!rec && !$('#vid-take-info').textContent) info('');
     document.querySelectorAll('[data-vseg="dir"] button').forEach((b) => b.classList.toggle('on', +b.dataset.value === v.dir));
     document.querySelectorAll('[data-vseg="fps"] button').forEach((b) => b.classList.toggle('on', b.dataset.value === v.fps));
     document.querySelectorAll('[data-vseg="smooth"] button').forEach((b) => b.classList.toggle('on', +b.dataset.value === v.smooth));
     document.querySelectorAll('[data-vmode] button').forEach((b) => b.classList.toggle('on', (b.dataset.value === 'mouse') === mine));
-    $('#vid-motion-row').classList.toggle('hidden', mine);
     document.querySelectorAll('#vid-format button').forEach((b) => b.classList.toggle('on', b.dataset.value === v.format));
-    $('#vid-smooth-row').classList.toggle('hidden', mine);
     fillSizes();
     const fmt = FORMATS[v.format], tr = $('#vid-transparent');
     tr.checked = v.transparent; tr.disabled = !fmt.alpha;
@@ -361,14 +396,17 @@ export function initVideo(ctx) {
   function setMotion(k) {
     if (rec) stopRec();
     stopPlay();
-    if (MOTIONS[v.motion].angle) angleMem[v.motion] = v.angle;
+    if (v.motion !== 'mine') { const was = motionOf(v.motion); if (was.angle) angleMem[v.motion] = v.angle; durMem[v.motion] = v.dur; }
     v.motion = k;
-    if (k !== 'mine') { v.lastPreset = k; motionSel.value = k; }
-    const m = MOTIONS[v.motion];
-    if (m.angle) { v.angle = angleMem[v.motion] ?? m.angle.def; v.dur = m.dur; }
+    if (k !== 'mine') {
+      v.lastPreset = k;
+      const m = motionOf(k);
+      if (m.angle) v.angle = angleMem[k] ?? m.angle.def;
+      v.dur = durMem[k] ?? m.dur;
+    }
     info(''); refresh();
   }
-  motionSel.addEventListener('change', () => setMotion(motionSel.value));
+  $('#vid-presets').addEventListener('click', (e) => { const b = e.target.closest('[data-move]'); if (b) setMotion(b.dataset.move); });
   document.querySelector('[data-vmode]').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     setMotion(b.dataset.value === 'mouse' ? 'mine' : v.lastPreset);

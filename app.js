@@ -8,6 +8,7 @@ import { BandsRig } from './bands.js';
 import { createMBandMaterials, buildMBand, poseMBand } from './mband.js';
 import { BLOCK, createBlockMaterials, buildBlock, poseBlock, setBlockFloor } from './yogablock.js';
 import { createBloomMaterials, buildBloom, setBloomFloor, setBloomLight } from './bloompod.js';
+import { createTravelBagMaterials, buildTravelBag } from './travelbag.js';   // the travel bag (offline: travel-bag-offline/)
 import { createScaleMaterials, buildScale, setScaleReading } from './scale.js';
 import { BP_PRESETS, createBPMaterials, buildBPMonitor, poseBPMonitor, setBPReading, visibleBox } from './bpmonitor.js';
 import { GL_PRESETS, createGlucoMaterials, buildGlucometer, poseGlucometer, setGlucoReading } from './glucometer.js';
@@ -57,6 +58,7 @@ const state = {
   glPose: 'upright',          // the glucometer: upright (leaning back a little) | lying (face up)
   glStrip: true,              // its test strip in the slot
   glLean: 10,                 // upright: how far it leans back (degrees; negative leans forward)
+  tbOpen: 0,                  // the travel bag's zip: 0 closed .. 1 all the way open
   glReading: 'normal',        // its LCD: normal (108) | high (212) | low (64) | custom (the fields)
   bpReading: 'high',          // its LCD: high (138/88) | low (105/68) | custom (the fields)
   scaleReading: '185.0',      // the scale's display: any digits, one decimal point
@@ -164,6 +166,8 @@ const BKM = createBlockMaterials(maxAniso);   // the yoga block: built in code, 
 const block = buildBlock(BKM);
 const BLM = createBloomMaterials();   // the Bloom pod: built in code from its side render, its silicone procedural (bloompod.js)
 const bloom = buildBloom(BLM);
+const TBM = createTravelBagMaterials(maxAniso);   // the travel bag: built in code from its product photo, the Sword logo printed on its front (travelbag.js)
+const travelbag = buildTravelBag(TBM);
 const SCM = createScaleMaterials(maxAniso);   // the scale: built in code from its product images (scale.js)
 const scale = buildScale(SCM);
 SCM.onChange = () => requestRender();   // the logo's mask arrives a moment later
@@ -181,7 +185,7 @@ const model = new THREE.Group();
 const bandsRig = new BandsRig(maxAniso);
 await bandsRig.init();
 bandsRig.camera = camera;   // prints are turned to the camera once a preset settles
-model.add(tablet, stand, phone, box, mband, block, bloom, scale, bp, gluco, padbox, bandsRig.group);
+model.add(tablet, stand, phone, box, mband, block, bloom, travelbag, scale, bp, gluco, padbox, bandsRig.group);
 scene.add(model, bandsRig.helpers);
 const isPhone = () => state.device === 'iphone';
 const isPad = () => state.device === 'pad';
@@ -189,6 +193,7 @@ const isBox = () => state.device === 'box';
 const isMBand = () => state.device === 'mband';
 const isBlock = () => state.device === 'block';
 const isBloom = () => state.device === 'bloom';
+const isBag = () => state.device === 'travelbag';
 const isScale = () => state.device === 'scale';
 const isBP = () => state.device === 'bp';
 const isGluco = () => state.device === 'gluco';
@@ -310,6 +315,15 @@ function poseBloomStudio() {
   bloom.position.set(-c.x, -b.min.y + 0.001, -c.z);
 }
 
+// the travel bag: standing on its base, centred (by its leather body, so it stays put as its zip opens and its pull
+// swings)
+function poseBagStudio() {
+  travelbag.position.set(0, 0, 0);
+  travelbag.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(travelbag.getObjectByName('body') || travelbag), c = b.getCenter(new THREE.Vector3());
+  travelbag.position.set(-c.x, -b.min.y + 0.001, -c.z);
+}
+
 // the yoga block: standing on its long side (as in its renders), lying flat or on its end, on the floor
 function poseBlockStudio() {
   poseBlock(block, state.blockPose);
@@ -346,17 +360,17 @@ function posePad() {
 // dropped last, so it lands on top); one moved into another is pushed out sideways. Take one from under another and
 // that one falls. The bands are simulated: the devices are obstacles in their simulation, so they drape over them.
 // Only the placements are worked out as you drag (no re-posing), so a drag stays light.
-const COMBO_ORDER = ['pad', 'padbox', 'iphone', 'box', 'bands', 'block', 'bloom', 'mband', 'scale', 'bp', 'gluco'];   // the device grid's order
-const COMBO_NAMES = { pad: 'Sword Pad', padbox: 'Sword Pad Box', iphone: 'Vision AI', bloom: 'Pelvic Health Pod', box: 'Band Box', bands: 'Bands', block: 'Yoga block', mband: 'Sword Band', scale: 'Scale', bp: 'BP monitor', gluco: 'Glucometer' };
+const COMBO_ORDER = ['pad', 'padbox', 'iphone', 'box', 'bands', 'block', 'bloom', 'travelbag', 'mband', 'scale', 'bp', 'gluco'];   // the device grid's order
+const COMBO_NAMES = { pad: 'Sword Pad', padbox: 'Sword Pad Box', iphone: 'Vision AI', bloom: 'Pelvic Health Pod', travelbag: 'Travel bag', box: 'Band Box', bands: 'Bands', block: 'Yoga block', mband: 'Sword Band', scale: 'Scale', bp: 'BP monitor', gluco: 'Glucometer' };
 const comboOn = () => state.comboOn && state.combo.some((d) => d !== state.device);
 const members = () => (comboOn() ? COMBO_ORDER.filter((d) => d === state.device || state.combo.includes(d)) : [state.device]);
 const bandsIn = () => members().includes('bands');
-const GROUP_OF = { pad: () => [tablet, stand], iphone: () => [phone], box: () => [box], bands: () => [], mband: () => [mband], block: () => [block], bloom: () => [bloom], scale: () => [scale], bp: () => [bp], gluco: () => [gluco], padbox: () => [padbox] };
-const POSER = { pad: posePad, iphone: posePhone, box: () => poseBox(true), bands: () => {}, mband: poseMBandStudio, block: poseBlockStudio, bloom: poseBloomStudio, scale: poseScaleStudio, bp: poseBPStudio, gluco: poseGlucoStudio, padbox: posePadBoxStudio };
+const GROUP_OF = { pad: () => [tablet, stand], iphone: () => [phone], box: () => [box], bands: () => [], mband: () => [mband], block: () => [block], bloom: () => [bloom], travelbag: () => [travelbag], scale: () => [scale], bp: () => [bp], gluco: () => [gluco], padbox: () => [padbox] };
+const POSER = { pad: posePad, iphone: posePhone, box: () => poseBox(true), bands: () => {}, mband: poseMBandStudio, block: poseBlockStudio, bloom: poseBloomStudio, travelbag: poseBagStudio, scale: poseScaleStudio, bp: poseBPStudio, gluco: poseGlucoStudio, padbox: posePadBoxStudio };
 // where each group was built: put back before posing (a combined shot moves and turns them). Recorded the first time
 // each is seen: the stand is a stand-in until its worker has meshed it, then replaced
 const HOME = new Map();
-const homeObjects = () => [tablet, stand, phone, box, mband, block, bloom, scale, bp, gluco, padbox, bandsRig.group, bandsRig.helpers];
+const homeObjects = () => [tablet, stand, phone, box, mband, block, bloom, travelbag, scale, bp, gluco, padbox, bandsRig.group, bandsRig.helpers];
 function restoreHome() {
   for (const o of homeObjects()) {
     if (!HOME.has(o)) HOME.set(o, [o.position.clone(), o.quaternion.clone(), o.scale.clone()]);
@@ -688,6 +702,7 @@ function applyPose() {
   mband.visible = on.has('mband');
   block.visible = on.has('block');
   bloom.visible = on.has('bloom');
+  travelbag.visible = on.has('travelbag');
   scale.visible = on.has('scale');
   bp.visible = on.has('bp');
   gluco.visible = on.has('gluco');
@@ -695,7 +710,7 @@ function applyPose() {
   bandsRig.group.visible = on.has('bands'); applyBandAids();
   stand.visible = on.has('pad') && state.stand;
   const mbFlat = isMBand() && state.mbandPose !== 'worn';
-  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : isScale() ? 22 : isBP() ? 12 : isGluco() ? 6 : isPadBox() ? 22 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : isScale() ? 150 : isBP() ? 90 : isGluco() ? 60 : isPadBox() ? 160 : 140);
+  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : isBag() ? 16 : isScale() ? 22 : isBP() ? 12 : isGluco() ? 6 : isPadBox() ? 22 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : isBag() ? 110 : isScale() ? 150 : isBP() ? 90 : isGluco() ? 60 : isPadBox() ? 160 : 140);
   if (comboOn()) {
     // each device in its own pose, then set side by side
     for (const d of members()) POSER[d]();
@@ -707,6 +722,8 @@ function applyPose() {
     poseMBandStudio();
   } else if (isBlock()) {
     poseBlockStudio();
+  } else if (isBag()) {
+    poseBagStudio();
   } else if (isBloom()) {
     poseBloomStudio();
   } else if (isScale()) {
@@ -741,7 +758,7 @@ function applyPose() {
 // distance, starting where the pose puts it: on the floor, or the box floating at its mockup's height
 const floorGaps = {};
 let floorRange = null;   // its slider (bound with the other shadow controls)
-const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isScale() ? `scale:${state.scaleTilt}` : isBP() ? `bp:${state.bpPose}` : isGluco() ? `gluco:${state.glPose}` : isPadBox() ? 'padbox' : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
+const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isBag() ? 'travelbag' : isScale() ? `scale:${state.scaleTilt}` : isBP() ? `bp:${state.bpPose}` : isGluco() ? `gluco:${state.glPose}` : isPadBox() ? 'padbox' : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
 function setFloor(fromPose) {
   if (isBands()) {
     // the bands' floor is their simulation's: fixed at y = 0. The slider sets how high the floating presets hang
@@ -770,6 +787,7 @@ function boundsOfDevice(d, exact = false) {
   if (d === 'mband') return new THREE.Box3().setFromObject(mband);
   if (d === 'block') return new THREE.Box3().setFromObject(block);
   if (d === 'bloom') return new THREE.Box3().setFromObject(bloom);
+  if (d === 'travelbag') return new THREE.Box3().setFromObject(travelbag);
   if (d === 'scale') return new THREE.Box3().setFromObject(scale);
   if (d === 'bp') return visibleBox(bp);
   if (d === 'gluco') return visibleBox(gluco);
@@ -882,6 +900,10 @@ const LIGHTING = { default: { room: [0.16, 0.30, 0.62], key: 1 },
   block: { room: [0.42, 0.55, 0.7], key: 0.85, fill: 1.3, fillAz: 45, scrim: 0.55, strips: [0, 1] },
   // the Bloom pod, as in its renders: a bright, soft, near-white studio, the key from above, a soft fill
   bloom: { room: [0.5, 0.46, 0.2], key: 1.0, fill: 0.9, scrim: 0.7 },
+  // the travel bag, as in its product photo: a soft key from the front left, the fill from behind its right (the zip's
+  // end in a soft shade, the back, which carries the logo too, not dull), the off-white leather keeping its gradients
+  // (a bright, even studio left it flat white)
+  travelbag: { room: [0.36, 0.4, 0.24], key: 1.0, fill: 0.95, fillAz: 165, scrim: 0.45 },
   // the scale, as in its product shot: a bright studio over it (the glass mirrors a large, soft overhead light)
   scale: { room: [0.62, 0.5, 0.3], key: 0.9, fill: 1.1, scrim: 0.8 },
   // the blood pressure monitor, as in its product shots: a bright, even white studio, the key soft and high
@@ -1073,6 +1095,11 @@ ground.renderOrder = -1;
 scene.add(ground);
 
 const SHADOW_SAMPLES = FLOAT_ACC ? 640 : 255;
+// how many it takes now: all of them, except in a video's frames while a device moves (its lid lifting: the floor
+// shadow re-done every frame, from the same first directions each time, so it holds still). Half of them look the
+// same and take half the time (80 showed bands)
+let shadowCap = SHADOW_SAMPLES;
+const MOVING_SHADOW_SAMPLES = 320;
 let accCount = 0;
 
 function resetShadow() {
@@ -1138,7 +1165,7 @@ function liveShadow() {
 }
 
 function accumulate(n) {
-  if (accCount >= SHADOW_SAMPLES) return false;
+  if (accCount >= Math.min(shadowCap, SHADOW_SAMPLES)) return false;
   const center = modelBounds().getCenter(new THREE.Vector3());
   accLight.target.position.copy(center);
   accLight.target.updateMatrixWorld();
@@ -1150,7 +1177,7 @@ function accumulate(n) {
   // the floor only receives (it never casts), so it cannot shade itself: no device takes a depth bias (0.12 cm of it
   // left a lit, white line of floor along each one's bottom edge)
   accLight.shadow.bias = 0;
-  for (let i = 0; i < n && accCount < SHADOW_SAMPLES; i++, accCount++) {
+  for (let i = 0; i < n && accCount < Math.min(shadowCap, SHADOW_SAMPLES); i++, accCount++) {
     accLight.position.copy(center).addScaledVector(sampleDir(), 250);
     accLight.updateMatrixWorld();
     renderer.shadowMap.needsUpdate = true;
@@ -1329,6 +1356,8 @@ function frameMBand() { if (state.mbandPose === 'worn') frame(-42, 14); else fra
 // the yoga block standing: from the front right and a little above, as in its render (its right side just showing)
 // the Bloom pod: its hero render's camera (a 55 mm lens from the front left, just above the floor: fitted to the
 // render's silhouette, Bloom pod/fit/camfit.py)
+// the travel bag: as its product photo (from the front right, a little above: its right end and zip showing)
+function frameBag() { frame(24, 9); }
 function frameBloom() {
   camera.setFocalLength(55); camera.updateProjectionMatrix();
   state.focal = 55; $('#focal').value = state.focal; $('#focal-v').textContent = `${state.focal} mm`; paintRange($('#focal'));
@@ -1446,13 +1475,14 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
     // the Bloom pod's renders are lit from above and the front left: the tops of the pod and the tail bright, their
     // undersides a deeper lilac
     if (v === 'bloom' && !bloomLit) { bloomLit = true; state.lightAz = -50; state.lightEl = 62; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
+    if (v === 'travelbag' && !bagLit) { bagLit = true; state.lightAz = -40; state.lightEl = 40; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }   // the photo: lit from the front left
     if (v === 'padbox' && !pbLit) { pbLit = true; state.lightAz = 30; state.lightEl = 40; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'gluco' && !glLit) { glLit = true; state.lightAz = -30; state.lightEl = 55; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'bp' && !bpLit) { bpLit = true; state.lightAz = -30; state.lightEl = 55; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'scale' && !scaleLit) { scaleLit = true; state.lightAz = -35; state.lightEl = 58; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'bands' && !bandsRig.meshes.length) bandsRig.setup();
     syncSetupUI(); applyPose(); updateLights(); drawLightPad();
-    if (comboOn()) { if (!pickedInView) frame(); } else if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else if (v === 'gluco') frameGluco(); else if (v === 'padbox') framePadBox(); else frame(32, 14);
+    if (comboOn()) { if (!pickedInView) frame(); } else if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'travelbag') frameBag(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else if (v === 'gluco') frameGluco(); else if (v === 'padbox') framePadBox(); else frame(32, 14);
     renderPicker(); renderCombo();
     if ((v === 'padbox' || fromBox) && screens[v]) {
       // the boxed pad and the Sword Pad each keep their own screen; the boxed pad's starts off
@@ -1605,9 +1635,10 @@ for (const k of ['sys', 'dia', 'pulse', 'time']) document.getElementById('bp-' +
   inp.addEventListener('input', () => { state.scaleReading = inp.value.replace(/[^0-9.,\- ]/g, '').slice(0, 7); setScaleReading(SCM, state.scaleReading); requestRender(); }); }
 function syncSetupUI() {
   video?.setAvailable(true);   // videos: every device, and combined shots
+  video?.refresh();            // (the device's own moves listed for it)
   const ph = isPhone();
   $('#stand-row').classList.toggle('hidden', !isPad());
-  $('#pose-row').classList.toggle('hidden', isPadBox() || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || isGluco() || (isPad() && state.stand));
+  $('#pose-row').classList.toggle('hidden', isPadBox() || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isBag() || isScale() || isBP() || isGluco() || (isPad() && state.stand));
   $('#mband-pose-row').classList.toggle('hidden', !isMBand());
   $('#block-pose-row').classList.toggle('hidden', !isBlock());
   $('#bloom-light-row').classList.toggle('hidden', !isBloom());
@@ -1625,6 +1656,7 @@ function syncSetupUI() {
     setSeg('pblid', o.lid); setSeg('pbpad', o.pad ? 'in' : 'out'); setSeg('pbpaper', o.paper ? 'with' : 'without'); setSeg('pbcharger', o.charger); setSeg('pblang', o.lang); }
   $('#gl-pose-row').classList.toggle('hidden', !isGluco());
   $('#gl-lean-row').classList.toggle('hidden', !isGluco() || state.glPose !== 'upright');
+  $('#tb-open-row').classList.toggle('hidden', !isBag());
   $('#gl-strip-row').classList.toggle('hidden', !isGluco());
   $('#gl-reading-row').classList.toggle('hidden', !isGluco());
   $('#gl-custom-row').classList.toggle('hidden', !isGluco() || state.glReading !== 'custom');
@@ -1643,7 +1675,7 @@ function syncSetupUI() {
   document.querySelectorAll('[data-band]').forEach((b) => b.classList.toggle('on', bandsRig.opts.on[b.dataset.band]));
   { const o = bandsRig.opts; setSeg('bandpos', o.pos); setSeg('bandshape', o.shape); setSeg('bandlay', o.lay); setSeg('bandprint', o.print); setSeg('bandpouch', o.pouch ? 'with' : 'without'); $('#band-hooks').checked = bandHooksWanted; }
   $('#band-hooks-row').classList.toggle('hidden', !bandHooksAllowed());   // only hung and stretched bands have hooks to show
-  $('#screen-section').classList.toggle('hidden', (isPadBox() && !state.pb.pad) || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isScale() || isBP() || isGluco());   // the box, the bands, the M-Band and the block have no screen
+  $('#screen-section').classList.toggle('hidden', (isPadBox() && !state.pb.pad) || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isBag() || isScale() || isBP() || isGluco());   // the box, the bands, the M-Band and the block have no screen
   $('#finish-row').classList.toggle('hidden', !ph);
   $('#phoenix-section').classList.toggle('hidden', !ph);
   phx.group.visible = ph && state.phoenix.on;
@@ -1658,7 +1690,7 @@ document.querySelectorAll('[data-finish]').forEach((b) => b.addEventListener('cl
 }));
 
 // lighting
-let envTimer = 0, mbandLit = false, bloomLit = false, scaleLit = false, bpLit = false, glLit = false, pbLit = false;
+let envTimer = 0, mbandLit = false, bloomLit = false, bagLit = false, scaleLit = false, bpLit = false, glLit = false, pbLit = false;
 // the box's mockup is lit by a key high on the front right (the direction of its floor shadow); its floor shadow is
 // darker and a little crisper than the studio's default; its lens is set by its framing
 let boxLook = { az: BOX_SCENE.key[0], el: BOX_SCENE.key[1], strength: 0.92, soft: 0.35 }, otherLook = null;
@@ -1697,6 +1729,10 @@ pbSliders();
 bindRange('scale-tilt', 'scaleTilt', deg, () => { applyPose(); updateLights(); requestRender(); });   // the scale's tilt
 $('#scale-tilt').addEventListener('change', () => frameScale());   // re-fitted once the slider is let go
 bindRange('gl-lean', 'glLean', deg, () => { applyPose(); updateLights(); requestRender(); });   // the glucometer's lean, upright
+// the travel bag's zip, from closed to all the way open (its leather, teeth and slider moved once a frame at most)
+let tbOpenFrame = 0;
+const tbOpenNow = () => { tbOpenFrame = 0; travelbag.userData.setOpen?.(state.tbOpen); applyPose(); updateLights(); requestRender(); };
+const tbOpenR = bindRange('tb-open', 'tbOpen', (v) => (v <= 0 ? 'Closed' : v >= 1 ? 'Open' : pct(v)), () => { if (!tbOpenFrame) tbOpenFrame = requestAnimationFrame(tbOpenNow); });
 bindRange('env', 'envIntensity', pct, (v) => { scene.environmentIntensity = v; requestRender(); });
 bindRange('exposure', 'exposure', (v) => v.toFixed(2), (v) => { renderer.toneMappingExposure = v; requestRender(); });
 
@@ -1918,7 +1954,7 @@ async function setScreenPreset(name) {
   if (name === 'off') screenSource = null;
   else if (name === 'exercise') {
     const dev = scrDev();
-    if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;
+    if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'travelbag' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;
     const src = dev === 'pad' ? await padExerciseSource() : await phoneExerciseSource();
     if (!src || screenPreset !== 'exercise' || scrDev() !== dev) return; // changed while loading
     screenSource = src;
@@ -1964,8 +2000,8 @@ function screenDefaults() {
 }
 function renderPicker() {
   const dev = scrDev();
-  $('#exercise-picker').classList.toggle('hidden', dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp' || dev === 'gluco');
-  if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;   // the box, the bands, the M-Band and the block have no screen
+  $('#exercise-picker').classList.toggle('hidden', dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'travelbag' || dev === 'scale' || dev === 'bp' || dev === 'gluco');
+  if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'travelbag' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;   // the box, the bands, the M-Band and the block have no screen
   const list = CATALOG[dev], p = state.pick[dev];
   const before = p.key, m = normalizePick(list, p);
   if (dev === 'iphone' && p.key !== before) screenDefaults();
@@ -2323,7 +2359,7 @@ async function renderToCanvas(W, H, transparent, onProgress) {
 }
 
 function shotSubject() {
-  return comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isPadBox() ? `sword-pad-box_${state.pb.lid === 'off' ? 'no-lid' : state.pb.lid}_${state.pb.pad ? 'pad' : 'empty'}${state.pb.paper && state.pb.lid !== 'closed' ? '_paper' : ''}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}${state.scaleTilt ? `_tilt-${Math.round(state.scaleTilt)}` : ''}` : isBloom() ? `pelvic-health-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-band-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `sword-pad_${state.stand ? 'stand' : state.pose}`;
+  return comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isPadBox() ? `sword-pad-box_${state.pb.lid === 'off' ? 'no-lid' : state.pb.lid}_${state.pb.pad ? 'pad' : 'empty'}${state.pb.paper && state.pb.lid !== 'closed' ? '_paper' : ''}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}${state.scaleTilt ? `_tilt-${Math.round(state.scaleTilt)}` : ''}` : isBloom() ? `pelvic-health-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBag() ? 'sword-travel-bag' : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-band-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `sword-pad_${state.stand ? 'stand' : state.pose}`;
 }
 
 async function exportImage() {
@@ -2377,6 +2413,8 @@ function beginVideoFrames(W, H) {
 let videoFrames = null;
 function renderVideoFrame(octx, W, H, transparent) {
   camera.updateProjectionMatrix();
+  // (a device's own move that changed its floor shadow: re-done, with fewer samples while it moves)
+  if (state.shadow && accCount < SHADOW_SAMPLES) { shadowCap = MOVING_SHADOW_SAMPLES; try { while (accumulate(64)) { /* converge */ } } finally { shadowCap = SHADOW_SAMPLES; } }
   renderMain();
   if (transparent) octx.clearRect(0, 0, W, H); else { octx.fillStyle = state.bg; octx.fillRect(0, 0, W, H); }
   octx.drawImage(renderer.domElement, 0, 0, videoFrames.rw, videoFrames.rh, 0, 0, W, H);
@@ -2401,7 +2439,87 @@ function hideBusy() {
   $('#busy-text').textContent = 'Rendering…';
   requestRender();
 }
-if (new URLSearchParams(location.search).has('debug')) window.__studio = { padbox, PBX, framePadBox, renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
+if (new URLSearchParams(location.search).has('debug')) window.__studio = { travelbag, TBM, frameBag, padbox, PBX, framePadBox, renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
+
+// ---------------------------------------------------------------- the devices' own moves, for videos
+// what a device can do itself, as a video's movement: its zip opening, its lid lifting, its display counting up, its
+// light coming on. Each: act(t) sets the device at t (0..1, eased by the video's Speed); at(t) moves the camera with it
+// (as the camera movements: az degrees round, el degrees over, k distance); save() and restore() keep and put back how
+// it was (round a video); done() shows where it ended in the panel's controls (a preview stays at its end)
+function deviceChanged(floor = true) { markShadowDirty(); if (floor) resetShadow(); requestRender(); }   // (floor: its soft floor shadow re-done too)
+function deviceMoves() {
+  if (comboOn()) return [];
+  const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  if (isBag()) {   // the travel bag: its zip
+    // (its floor shadow hardly changes as it opens: kept while it moves, re-done where it ends)
+    const set = (v) => { state.tbOpen = v; travelbag.userData.setOpen?.(v); poseBagStudio(); deviceChanged(false); };
+    const ui = () => { tbOpenR.el.value = state.tbOpen; tbOpenR.show(); deviceChanged(); };
+    const keep = { save: () => state.tbOpen, restore: (v) => { set(v); ui(); }, done: ui };
+    return [
+      { key: 'bag-unzip', label: 'Unzip', dur: 7, ...keep, note: 'The zip opens softly, from closed to all the way open, the camera drifting in and up a little.',
+        act: (t) => set(t), at: (t) => ({ az: 8 * t, el: 12 * t, k: 1 - 0.08 * t }) },
+      { key: 'bag-look', label: 'Unzip & look in', dur: 9, ...keep, note: 'The zip opens, then the camera rises over the bag to look inside.',
+        act: (t) => set(ss(0, 0.6, t)), at: (t) => { const u = ss(0.4, 1, t); return { az: 10 * u, el: 50 * u, k: 1 - 0.15 * u }; } },
+      { key: 'bag-zip', label: 'Zip up', dur: 6, ...keep, note: 'From all the way open, the zip closes softly.',
+        act: (t) => set(1 - t), at: (t) => ({ az: -6 * t, el: 10 * (1 - t) }) },
+      { key: 'bag-loop', label: 'Open & close', dur: 10, loop: true, ...keep, note: 'It opens and closes again: a loop.',
+        act: (t) => set(Math.sin(Math.PI * t)), at: (t) => ({ el: 10 * Math.sin(Math.PI * t) }) },
+    ];
+  }
+  if (isPadBox()) {   // the Pad Box: its lid, lifting to the open pose set with its sliders (or the usual one)
+    const o0 = { ...state.pb }, D = PADBOX_DEFAULTS;
+    const T = o0.lid === 'open' && o0.lidLift > 0 ? { lift: o0.lidLift, tilt: o0.lidTilt, slide: o0.lidSlide } : { lift: D.lidLift, tilt: D.lidTilt, slide: D.lidSlide };
+    const lid = (e) => {
+      Object.assign(state.pb, e <= 0.001 ? { lid: 'closed' } : { lid: 'open', lidLift: T.lift * e, lidTilt: T.tilt * e, lidSlide: T.slide * e });
+      posePadBoxStudio(); deviceChanged();
+    };
+    const ui = () => { setSeg('pblid', state.pb.lid); pbSliders(); syncSetupUI(); };
+    const keep = { save: () => ({ ...state.pb }), restore: (o) => { Object.assign(state.pb, o); posePadBoxStudio(); deviceChanged(); ui(); }, done: ui };
+    return [
+      { key: 'pb-open', label: 'Lid lifts off', dur: 5, ...keep, note: 'The lid rises off the box and tips back to its open pose (the Lid sliders set where it ends).',
+        act: (t) => lid(t), at: (t) => ({ el: 8 * t, k: 1 + 0.08 * t }) },
+      { key: 'pb-look', label: 'Open & look in', dur: 8, ...keep, note: 'The lid lifts off, then the camera rises to look into the box.',
+        act: (t) => lid(ss(0, 0.55, t)), at: (t) => { const u = ss(0.4, 1, t); return { el: 35 * u, k: 1 + 0.1 * u }; } },
+      { key: 'pb-close', label: 'Lid goes on', dur: 5, ...keep, note: 'From open, the lid comes down onto the box.',
+        act: (t) => lid(1 - t), at: (t) => ({ el: 8 * (1 - t), k: 1 + 0.08 * (1 - t) }) },
+    ];
+  }
+  if (isScale()) {   // the scale: its display counting up to the reading, as someone steps on
+    const text = state.scaleReading, m = String(text).replace(',', '.').match(/-?\d+(\.\d+)?/);
+    if (!m) return [];
+    const num = parseFloat(m[0]), dec = m[1] ? m[1].length - 1 : 0, show = (x) => { setScaleReading(SCM, x); requestRender(); };
+    return [{ key: 'scale-weigh', label: 'Weighing', dur: 5, note: 'The display counts up to the reading, blinks, and holds it, as when someone steps on.',
+      save: () => SCM.reading, restore: (x) => show(x),
+      act: (t) => {
+        if (t < 0.08) return show((0).toFixed(dec));
+        if (t < 0.7) { const u = (t - 0.08) / 0.62; return show((num * (1 - Math.pow(1 - u, 3))).toFixed(dec)); }
+        if (t < 0.88) return show(Math.floor((t - 0.7) / 0.045) % 2 ? '' : text);
+        show(text);
+      }, at: (t) => ({ el: 5 * t, k: 1 - 0.06 * t }) }];
+  }
+  if (isBP()) {   // the blood pressure monitor: the cuff pumps up, lets down, and the reading appears
+    const R = { ...BPM.reading }, sys = parseInt(R.sys, 10);
+    if (!(sys > 0)) return [];
+    const show = (r) => { setBPReading(BPM, r); requestRender(); }, peak = sys + 35, low = parseInt(R.dia, 10) || sys - 40;
+    return [{ key: 'bp-measure', label: 'Measuring', dur: 7, note: 'The cuff pumps up (the pressure climbs), lets down slowly, then the reading appears.',
+      save: () => ({ ...BPM.reading }), restore: (r) => show(r),
+      act: (t) => {
+        if (t < 0.06) return show({ ...R, sys: '0', dia: '', pulse: '' });
+        if (t < 0.45) return show({ ...R, sys: String(Math.round(peak * ss(0.06, 0.45, t))), dia: '', pulse: '' });
+        if (t < 0.82) return show({ ...R, sys: String(Math.round(peak - (peak - low) * ((t - 0.45) / 0.37))), dia: '', pulse: '' });   // (letting down past the systolic towards the diastolic)
+        show(R);
+      }, at: (t) => ({ el: 4 * t, k: 1 - 0.06 * t }) }];
+  }
+  if (isGluco()) {   // the glucometer: counts down as it reads the strip, then the result
+    const R = { ...GLM.reading }, show = (r) => { setGlucoReading(GLM, r); requestRender(); };
+    return [{ key: 'gl-measure', label: 'Measuring', dur: 6, note: 'It counts down from 5 as it reads the strip, then shows the result.',
+      save: () => ({ ...GLM.reading }), restore: (r) => show(r),
+      act: (t) => show(t < 0.72 ? { ...R, value: String(Math.max(1, 5 - Math.floor(t / 0.144))) } : R),
+      at: (t) => ({ el: 4 * t, k: 1 - 0.06 * t }) }];
+  }
+  return [];
+}
+const deviceName = () => (comboOn() ? '' : COMBO_NAMES[state.device] || '');
 
 // ---------------------------------------------------------------- init
 // (loaded on its own: if anything in it fails, the studio carries on without the Video section)
@@ -2418,6 +2536,7 @@ try {
     beginFrames: beginVideoFrames, renderFrame: renderVideoFrame, endFrames: endVideoFrames,
     subject: shotSubject,
     setShadow: (on) => { const was = state.shadow; state.shadow = on; requestRender(); return was; },
+    deviceMoves, deviceName,
   });
 } catch (err) { console.error('Video unavailable', err); video = null; $('#video-section')?.classList.add('hidden'); }
 if (IS_TOUCH) $('.hint').textContent = 'Drag to rotate · Pinch to zoom · Two-finger drag to pan';
@@ -2442,7 +2561,7 @@ stand = standMesh;
 model.add(stand);
 applyPose();
 updateLights();
-if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else if (isBloom()) frameBloom(); else if (isScale()) frameScale(); else if (isBP()) frameBP(); else if (isGluco()) frameGluco(); else if (isPadBox()) framePadBox(); else frame(32, 14);   // a device may have been picked while the studio loaded
+if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else if (isBloom()) frameBloom(); else if (isBag()) frameBag(); else if (isScale()) frameScale(); else if (isBP()) frameBP(); else if (isGluco()) frameGluco(); else if (isPadBox()) framePadBox(); else frame(32, 14);   // a device may have been picked while the studio loaded
 $('#busy').classList.remove('show');
 $('#busy-text').textContent = 'Rendering…';
 // open on a device from a link, e.g. ?device=bands (the Figma "Sword 3D Studio" card links each device this way)
