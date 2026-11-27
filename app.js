@@ -1521,7 +1521,7 @@ document.querySelectorAll('.devices button[data-value]').forEach((b) => {
   b.appendChild(c);
 });
 function renderCombo() {
-  $('#combo-controls').classList.toggle('disabled', !state.comboOn);
+  $('#combo-controls').classList.toggle('hidden', !state.comboOn);   // off: its options hidden (greyed out, they made the panel look busy)
   document.querySelectorAll('.kit').forEach((k) => { k.textContent = state.comboOn ? 'Uncombine' : 'Combine'; k.classList.toggle('on', state.comboOn); k.title = state.comboOn ? 'Uncombine: only the selected device stays' : 'Combine devices in one shot: tick the ones to show'; });
   devSection.classList.toggle('combining', state.comboOn);
   document.querySelectorAll('.dev-check').forEach((c) => {
