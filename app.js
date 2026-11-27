@@ -9,6 +9,7 @@ import { createMBandMaterials, buildMBand, poseMBand } from './mband.js';
 import { BLOCK, createBlockMaterials, buildBlock, poseBlock, setBlockFloor } from './yogablock.js';
 import { createBloomMaterials, buildBloom, setBloomFloor, setBloomLight } from './bloompod.js';
 import { createTravelBagMaterials, buildTravelBag } from './travelbag.js';   // the travel bag (offline: travel-bag-offline/)
+import { createLubeMaterials, buildLube } from './lube.js';   // the lubricant sachets, with physics (offline: lube-offline/)
 import { createScaleMaterials, buildScale, setScaleReading } from './scale.js';
 import { BP_PRESETS, createBPMaterials, buildBPMonitor, poseBPMonitor, setBPReading, visibleBox } from './bpmonitor.js';
 import { GL_PRESETS, createGlucoMaterials, buildGlucometer, poseGlucometer, setGlucoReading } from './glucometer.js';
@@ -59,6 +60,7 @@ const state = {
   glStrip: true,              // its test strip in the slot
   glLean: 10,                 // upright: how far it leans back (degrees; negative leans forward)
   tbOpen: 0,                  // the travel bag's zip: 0 closed .. 1 all the way open
+  lube: { count: 3, arr: 'pile' },    // the lubricant sachets: how many (1..3) and how they lie (pile | fan | row | float)
   glReading: 'normal',        // its LCD: normal (108) | high (212) | low (64) | custom (the fields)
   bpReading: 'high',          // its LCD: high (138/88) | low (105/68) | custom (the fields)
   scaleReading: '185.0',      // the scale's display: any digits, one decimal point
@@ -168,6 +170,9 @@ const BLM = createBloomMaterials();   // the Bloom pod: built in code from its s
 const bloom = buildBloom(BLM);
 const TBM = createTravelBagMaterials(maxAniso);   // the travel bag: built in code from its product photo, the Sword logo printed on its front (travelbag.js)
 const travelbag = buildTravelBag(TBM);
+const LBM = createLubeMaterials(maxAniso);   // the lubricant sachets: built in code from their product photo, moved by physics (lube.js)
+const lube = buildLube(LBM);
+const lubeSim = lube.sim;
 const SCM = createScaleMaterials(maxAniso);   // the scale: built in code from its product images (scale.js)
 const scale = buildScale(SCM);
 SCM.onChange = () => requestRender();   // the logo's mask arrives a moment later
@@ -185,7 +190,7 @@ const model = new THREE.Group();
 const bandsRig = new BandsRig(maxAniso);
 await bandsRig.init();
 bandsRig.camera = camera;   // prints are turned to the camera once a preset settles
-model.add(tablet, stand, phone, box, mband, block, bloom, travelbag, scale, bp, gluco, padbox, bandsRig.group);
+model.add(tablet, stand, phone, box, mband, block, bloom, travelbag, lube, scale, bp, gluco, padbox, bandsRig.group);
 scene.add(model, bandsRig.helpers);
 const isPhone = () => state.device === 'iphone';
 const isPad = () => state.device === 'pad';
@@ -194,6 +199,7 @@ const isMBand = () => state.device === 'mband';
 const isBlock = () => state.device === 'block';
 const isBloom = () => state.device === 'bloom';
 const isBag = () => state.device === 'travelbag';
+const isLube = () => state.device === 'lube';
 const isScale = () => state.device === 'scale';
 const isBP = () => state.device === 'bp';
 const isGluco = () => state.device === 'gluco';
@@ -324,6 +330,16 @@ function poseBagStudio() {
   travelbag.position.set(-c.x, -b.min.y + 0.001, -c.z);
 }
 
+// the lubricant sachets: where their physics has them (in the group's own frame, the floor at y = 0)
+// (combined with other devices, which all rest on the floor, floating ones lie fanned on it instead; back on their own,
+// they float again)
+function poseLubeStudio() {
+  lube.position.set(0, 0, 0); lube.quaternion.identity();
+  if (comboOn() && state.lube.arr === 'float' && lubeSim.arr === 'float') lubeSim.arrange('fan', state.lube.count, { settle: true });
+  else if (!comboOn() && state.lube.arr === 'float' && lubeSim.arr !== 'float') lubeSim.arrange('float', state.lube.count);
+  lubeSim.sync();
+}
+
 // the yoga block: standing on its long side (as in its renders), lying flat or on its end, on the floor
 function poseBlockStudio() {
   poseBlock(block, state.blockPose);
@@ -360,17 +376,17 @@ function posePad() {
 // dropped last, so it lands on top); one moved into another is pushed out sideways. Take one from under another and
 // that one falls. The bands are simulated: the devices are obstacles in their simulation, so they drape over them.
 // Only the placements are worked out as you drag (no re-posing), so a drag stays light.
-const COMBO_ORDER = ['pad', 'padbox', 'iphone', 'box', 'bands', 'block', 'bloom', 'travelbag', 'mband', 'scale', 'bp', 'gluco'];   // the device grid's order
-const COMBO_NAMES = { pad: 'Sword Pad', padbox: 'Sword Pad Box', iphone: 'Vision AI', bloom: 'Pelvic Health Pod', travelbag: 'Travel bag', box: 'Band Box', bands: 'Bands', block: 'Yoga block', mband: 'Sword Band', scale: 'Scale', bp: 'BP monitor', gluco: 'Glucometer' };
+const COMBO_ORDER = ['pad', 'padbox', 'iphone', 'box', 'bands', 'block', 'bloom', 'travelbag', 'lube', 'mband', 'scale', 'bp', 'gluco'];   // the device grid's order
+const COMBO_NAMES = { pad: 'Sword Pad', padbox: 'Sword Pad Box', iphone: 'Vision AI', bloom: 'Pelvic Health Pod', travelbag: 'Travel bag', lube: 'Lubricant', box: 'Band Box', bands: 'Bands', block: 'Yoga block', mband: 'Sword Band', scale: 'Scale', bp: 'BP monitor', gluco: 'Glucometer' };
 const comboOn = () => state.comboOn && state.combo.some((d) => d !== state.device);
 const members = () => (comboOn() ? COMBO_ORDER.filter((d) => d === state.device || state.combo.includes(d)) : [state.device]);
 const bandsIn = () => members().includes('bands');
-const GROUP_OF = { pad: () => [tablet, stand], iphone: () => [phone], box: () => [box], bands: () => [], mband: () => [mband], block: () => [block], bloom: () => [bloom], travelbag: () => [travelbag], scale: () => [scale], bp: () => [bp], gluco: () => [gluco], padbox: () => [padbox] };
-const POSER = { pad: posePad, iphone: posePhone, box: () => poseBox(true), bands: () => {}, mband: poseMBandStudio, block: poseBlockStudio, bloom: poseBloomStudio, travelbag: poseBagStudio, scale: poseScaleStudio, bp: poseBPStudio, gluco: poseGlucoStudio, padbox: posePadBoxStudio };
+const GROUP_OF = { pad: () => [tablet, stand], iphone: () => [phone], box: () => [box], bands: () => [], mband: () => [mband], block: () => [block], bloom: () => [bloom], travelbag: () => [travelbag], lube: () => [lube], scale: () => [scale], bp: () => [bp], gluco: () => [gluco], padbox: () => [padbox] };
+const POSER = { pad: posePad, iphone: posePhone, box: () => poseBox(true), bands: () => {}, mband: poseMBandStudio, block: poseBlockStudio, bloom: poseBloomStudio, travelbag: poseBagStudio, lube: poseLubeStudio, scale: poseScaleStudio, bp: poseBPStudio, gluco: poseGlucoStudio, padbox: posePadBoxStudio };
 // where each group was built: put back before posing (a combined shot moves and turns them). Recorded the first time
 // each is seen: the stand is a stand-in until its worker has meshed it, then replaced
 const HOME = new Map();
-const homeObjects = () => [tablet, stand, phone, box, mband, block, bloom, travelbag, scale, bp, gluco, padbox, bandsRig.group, bandsRig.helpers];
+const homeObjects = () => [tablet, stand, phone, box, mband, block, bloom, travelbag, lube, scale, bp, gluco, padbox, bandsRig.group, bandsRig.helpers];
 function restoreHome() {
   for (const o of homeObjects()) {
     if (!HOME.has(o)) HOME.set(o, [o.position.clone(), o.quaternion.clone(), o.scale.clone()]);
@@ -703,6 +719,7 @@ function applyPose() {
   block.visible = on.has('block');
   bloom.visible = on.has('bloom');
   travelbag.visible = on.has('travelbag');
+  lube.visible = on.has('lube');
   scale.visible = on.has('scale');
   bp.visible = on.has('bp');
   gluco.visible = on.has('gluco');
@@ -710,7 +727,7 @@ function applyPose() {
   bandsRig.group.visible = on.has('bands'); applyBandAids();
   stand.visible = on.has('pad') && state.stand;
   const mbFlat = isMBand() && state.mbandPose !== 'worn';
-  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : isBag() ? 16 : isScale() ? 22 : isBP() ? 12 : isGluco() ? 6 : isPadBox() ? 22 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : isBag() ? 110 : isScale() ? 150 : isBP() ? 90 : isGluco() ? 60 : isPadBox() ? 160 : 140);
+  setShadowFrame(isPhone() ? 11 : isBox() ? 17 : isBands() ? 30 : isMBand() ? (mbFlat ? 19 : 8) : isBlock() ? 16 : isBloom() ? 12 : isBag() ? 16 : isLube() ? 18 : isScale() ? 22 : isBP() ? 12 : isGluco() ? 6 : isPadBox() ? 22 : 19, isPhone() ? 70 : isBox() ? 100 : isBands() ? 130 : isMBand() ? (mbFlat ? 80 : 50) : isBlock() ? 120 : isBloom() ? 90 : isBag() ? 110 : isLube() ? 120 : isScale() ? 150 : isBP() ? 90 : isGluco() ? 60 : isPadBox() ? 160 : 140);
   if (comboOn()) {
     // each device in its own pose, then set side by side
     for (const d of members()) POSER[d]();
@@ -724,6 +741,8 @@ function applyPose() {
     poseBlockStudio();
   } else if (isBag()) {
     poseBagStudio();
+  } else if (isLube()) {
+    poseLubeStudio();
   } else if (isBloom()) {
     poseBloomStudio();
   } else if (isScale()) {
@@ -758,7 +777,7 @@ function applyPose() {
 // distance, starting where the pose puts it: on the floor, or the box floating at its mockup's height
 const floorGaps = {};
 let floorRange = null;   // its slider (bound with the other shadow controls)
-const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isBag() ? 'travelbag' : isScale() ? `scale:${state.scaleTilt}` : isBP() ? `bp:${state.bpPose}` : isGluco() ? `gluco:${state.glPose}` : isPadBox() ? 'padbox' : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
+const poseKey = () => (isBox() ? `box:${state.boxPose}` : isMBand() ? `mband:${state.mbandPose}` : isBlock() ? `block:${state.blockPose}` : isBloom() ? 'bloom' : isBag() ? 'travelbag' : isLube() ? `lube:${state.lube.arr}` : isScale() ? `scale:${state.scaleTilt}` : isBP() ? `bp:${state.bpPose}` : isGluco() ? `gluco:${state.glPose}` : isPadBox() ? 'padbox' : isPad() ? `pad:${state.stand ? 'stand' : state.pose}` : `${state.device}:${state.pose}`);
 function setFloor(fromPose) {
   if (isBands()) {
     // the bands' floor is their simulation's: fixed at y = 0. The slider sets how high the floating presets hang
@@ -788,6 +807,7 @@ function boundsOfDevice(d, exact = false) {
   if (d === 'block') return new THREE.Box3().setFromObject(block);
   if (d === 'bloom') return new THREE.Box3().setFromObject(bloom);
   if (d === 'travelbag') return new THREE.Box3().setFromObject(travelbag);
+  if (d === 'lube') { lube.updateMatrixWorld(true); return lubeSim.bounds().applyMatrix4(lube.matrixWorld); }   // (from the bent meshes' bounds: kept as they move)
   if (d === 'scale') return new THREE.Box3().setFromObject(scale);
   if (d === 'bp') return visibleBox(bp);
   if (d === 'gluco') return visibleBox(gluco);
@@ -904,6 +924,8 @@ const LIGHTING = { default: { room: [0.16, 0.30, 0.62], key: 1 },
   // end in a soft shade, the back, which carries the logo too, not dull), the off-white leather keeping its gradients
   // (a bright, even studio left it flat white)
   travelbag: { room: [0.36, 0.4, 0.24], key: 1.0, fill: 0.95, fillAz: 165, scrim: 0.45 },
+  // the lubricant sachets, as in their photo: a bright, soft studio, the satin foil's sheen broad and pale
+  lube: { room: [0.2, 0.34, 0.3], key: 1.15, fill: 0.55, scrim: 0.5 },
   // the scale, as in its product shot: a bright studio over it (the glass mirrors a large, soft overhead light)
   scale: { room: [0.62, 0.5, 0.3], key: 0.9, fill: 1.1, scrim: 0.8 },
   // the blood pressure monitor, as in its product shots: a bright, even white studio, the key soft and high
@@ -1251,7 +1273,7 @@ function updateSelOutline() {
   const name = COMBO_NAMES[state.device]; if (selBox.firstChild.textContent !== name) selBox.firstChild.textContent = name;
 }
 
-let padCheck = 0;
+let padCheck = 0, lubeMoving = false;
 function loop() {
   requestAnimationFrame(loop);
   if (videoHold) return;
@@ -1262,6 +1284,13 @@ function loop() {
   if (video) { try { video.tick(); } catch (err) { console.error(err); } }   // a video's preview or a recording
   const moving = bandsIn() && bandsRig.step();
   if (moving) { markShadowDirty(); resetShadow(); }
+  // the sachets falling, pushed or held: the view and their floor shadow follow; once they rest, a full shadow
+  if (isLube() && !comboOn() && !videoFrames) {
+    const was = lubeMoving;
+    lubeMoving = lubeSim.step();
+    if (lubeMoving) { markShadowDirty(); syncProxyParts(); resetShadow(true); }
+    else if (was) { markShadowDirty(); syncProxyParts(); resetShadow(); }
+  }
   if (state.shadow) {
     // the bands: their live shadow while they move, the full one once they rest
     if (isBands() && liveDirty) { liveShadow(); dirty = true; }
@@ -1363,6 +1392,8 @@ function frameMBand() { if (state.mbandPose === 'worn') frame(-42, 14); else fra
 // render's silhouette, Bloom pod/fit/camfit.py)
 // the travel bag: as its product photo (from the front right, a little above: its right end and zip showing)
 function frameBag() { frame(24, 9); }
+// the sachets: floating, from the front and a touch below their middle, as their photo; lying, from above at an angle
+function frameLube() { if (state.lube.arr === 'float') frame(-16, 8); else frame(16, 34); }
 function frameBloom() {
   camera.setFocalLength(55); camera.updateProjectionMatrix();
   state.focal = 55; $('#focal').value = state.focal; $('#focal-v').textContent = `${state.focal} mm`; paintRange($('#focal'));
@@ -1480,6 +1511,7 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
     // the Bloom pod's renders are lit from above and the front left: the tops of the pod and the tail bright, their
     // undersides a deeper lilac
     if (v === 'bloom' && !bloomLit) { bloomLit = true; state.lightAz = -50; state.lightEl = 62; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
+    if (v === 'lube' && !lubeLit) { lubeLit = true; state.lightAz = -38; state.lightEl = 48; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }   // the photo: lit softly from the front left, above
     if (v === 'travelbag' && !bagLit) { bagLit = true; state.lightAz = -40; state.lightEl = 40; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }   // the photo: lit from the front left
     if (v === 'padbox' && !pbLit) { pbLit = true; state.lightAz = 30; state.lightEl = 40; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'gluco' && !glLit) { glLit = true; state.lightAz = -30; state.lightEl = 55; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
@@ -1487,7 +1519,7 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
     if (v === 'scale' && !scaleLit) { scaleLit = true; state.lightAz = -35; state.lightEl = 58; lAz.el.value = state.lightAz; lAz.show(); lEl.el.value = state.lightEl; lEl.show(); lightChanged(); }
     if (v === 'bands' && !bandsRig.meshes.length) bandsRig.setup();
     syncSetupUI(); applyPose(); updateLights(); drawLightPad();
-    if (comboOn()) { if (!pickedInView) frame(); } else if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'travelbag') frameBag(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else if (v === 'gluco') frameGluco(); else if (v === 'padbox') framePadBox(); else frame(32, 14);
+    if (comboOn()) { if (!pickedInView) frame(); } else if (v === 'box') frameBox(); else if (v === 'bands') frameBands(); else if (v === 'mband') frameMBand(); else if (v === 'block') frameBlock(); else if (v === 'bloom') frameBloom(); else if (v === 'travelbag') frameBag(); else if (v === 'lube') frameLube(); else if (v === 'scale') frameScale(); else if (v === 'bp') frameBP(); else if (v === 'gluco') frameGluco(); else if (v === 'padbox') framePadBox(); else frame(32, 14);
     renderPicker(); renderCombo();
     if ((v === 'padbox' || fromBox) && screens[v]) {
       // the boxed pad and the Sword Pad each keep their own screen; the boxed pad's starts off
@@ -1496,6 +1528,8 @@ document.querySelectorAll('[data-seg]').forEach((g) => g.addEventListener('click
       if (screenPreset === 'exercise') setScreenPreset('exercise'); else updateScreen();
     } else if (screenPreset === 'exercise') setScreenPreset('exercise'); else updateScreen();
   }
+  if (name === 'lubecount') { state.lube.count = +v; if (state.lube.arr === 'pile') { lubeSim.count = state.lube.count; lubeSim.drop(); } else lubeSim.arrange(state.lube.arr, state.lube.count); lubeSettled(); if (!comboOn()) frameLube(); }   // (a pile drops again, live)
+  if (name === 'lubearr') { state.lube.arr = v; if (v === 'pile') lubeSim.drop(); else lubeSim.arrange(v, state.lube.count); lubeSettled(); frameLube(); }
   if (name === 'boxpose') { state.boxPose = v; applyPose(); updateLights(); frameBox(); }
   if (name === 'mbandpose') { state.mbandPose = v; applyPose(); updateLights(); frameMBand(); }
   if (name === 'pblid') {
@@ -1643,7 +1677,7 @@ function syncSetupUI() {
   video?.refresh();            // (the device's own moves listed for it)
   const ph = isPhone();
   $('#stand-row').classList.toggle('hidden', !isPad());
-  $('#pose-row').classList.toggle('hidden', isPadBox() || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isBag() || isScale() || isBP() || isGluco() || (isPad() && state.stand));
+  $('#pose-row').classList.toggle('hidden', isPadBox() || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isBag() || isLube() || isScale() || isBP() || isGluco() || (isPad() && state.stand));
   $('#mband-pose-row').classList.toggle('hidden', !isMBand());
   $('#block-pose-row').classList.toggle('hidden', !isBlock());
   $('#bloom-light-row').classList.toggle('hidden', !isBloom());
@@ -1662,6 +1696,8 @@ function syncSetupUI() {
   $('#gl-pose-row').classList.toggle('hidden', !isGluco());
   $('#gl-lean-row').classList.toggle('hidden', !isGluco() || state.glPose !== 'upright');
   $('#tb-open-row').classList.toggle('hidden', !isBag());
+  for (const id of ['lube-count-row', 'lube-arr-row', 'lube-act-row', 'lube-note']) $('#' + id).classList.toggle('hidden', !isLube() || (comboOn() && id !== 'lube-count-row'));
+  setSeg('lubecount', String(state.lube.count)); setSeg('lubearr', state.lube.arr);
   $('#gl-strip-row').classList.toggle('hidden', !isGluco());
   $('#gl-reading-row').classList.toggle('hidden', !isGluco());
   $('#gl-custom-row').classList.toggle('hidden', !isGluco() || state.glReading !== 'custom');
@@ -1680,7 +1716,7 @@ function syncSetupUI() {
   document.querySelectorAll('[data-band]').forEach((b) => b.classList.toggle('on', bandsRig.opts.on[b.dataset.band]));
   { const o = bandsRig.opts; setSeg('bandpos', o.pos); setSeg('bandshape', o.shape); setSeg('bandlay', o.lay); setSeg('bandprint', o.print); setSeg('bandpouch', o.pouch ? 'with' : 'without'); $('#band-hooks').checked = bandHooksWanted; }
   $('#band-hooks-row').classList.toggle('hidden', !bandHooksAllowed());   // only hung and stretched bands have hooks to show
-  $('#screen-section').classList.toggle('hidden', (isPadBox() && !state.pb.pad) || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isBag() || isScale() || isBP() || isGluco());   // the box, the bands, the M-Band and the block have no screen
+  $('#screen-section').classList.toggle('hidden', (isPadBox() && !state.pb.pad) || isBox() || isBands() || isMBand() || isBlock() || isBloom() || isBag() || isLube() || isScale() || isBP() || isGluco());   // the box, the bands, the M-Band and the block have no screen
   $('#finish-row').classList.toggle('hidden', !ph);
   $('#phoenix-section').classList.toggle('hidden', !ph);
   phx.group.visible = ph && state.phoenix.on;
@@ -1695,7 +1731,7 @@ document.querySelectorAll('[data-finish]').forEach((b) => b.addEventListener('cl
 }));
 
 // lighting
-let envTimer = 0, mbandLit = false, bloomLit = false, bagLit = false, scaleLit = false, bpLit = false, glLit = false, pbLit = false;
+let envTimer = 0, mbandLit = false, bloomLit = false, bagLit = false, lubeLit = false, scaleLit = false, bpLit = false, glLit = false, pbLit = false;
 // the box's mockup is lit by a key high on the front right (the direction of its floor shadow); its floor shadow is
 // darker and a little crisper than the studio's default; its lens is set by its framing
 let boxLook = { az: BOX_SCENE.key[0], el: BOX_SCENE.key[1], strength: 0.92, soft: 0.35 }, otherLook = null;
@@ -1959,7 +1995,7 @@ async function setScreenPreset(name) {
   if (name === 'off') screenSource = null;
   else if (name === 'exercise') {
     const dev = scrDev();
-    if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'travelbag' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;
+    if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'travelbag' || dev === 'lube' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;
     const src = dev === 'pad' ? await padExerciseSource() : await phoneExerciseSource();
     if (!src || screenPreset !== 'exercise' || scrDev() !== dev) return; // changed while loading
     screenSource = src;
@@ -2005,8 +2041,8 @@ function screenDefaults() {
 }
 function renderPicker() {
   const dev = scrDev();
-  $('#exercise-picker').classList.toggle('hidden', dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'travelbag' || dev === 'scale' || dev === 'bp' || dev === 'gluco');
-  if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'travelbag' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;   // the box, the bands, the M-Band and the block have no screen
+  $('#exercise-picker').classList.toggle('hidden', dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'travelbag' || dev === 'lube' || dev === 'scale' || dev === 'bp' || dev === 'gluco');
+  if (dev === 'box' || dev === 'bands' || dev === 'mband' || dev === 'block' || dev === 'bloom' || dev === 'travelbag' || dev === 'lube' || dev === 'scale' || dev === 'bp' || dev === 'gluco') return;   // the box, the bands, the M-Band and the block have no screen
   const list = CATALOG[dev], p = state.pick[dev];
   const before = p.key, m = normalizePick(list, p);
   if (dev === 'iphone' && p.key !== before) screenDefaults();
@@ -2296,6 +2332,59 @@ stage.addEventListener('wheel', (e) => {
   if (!dragRaf) dragRaf = requestAnimationFrame(() => { dragRaf = 0; comboMoved(); });
 }, { capture: true, passive: false });
 
+// the sachets: drag one to pick it up (it hangs from where you hold it, swinging as you move) and let go to drop it;
+// ⌥-drag slides it along the floor instead of lifting it; scroll while holding it to turn it. Floating, they drift
+// with no gravity: drag one across the view and it shoves the others
+let lubeDrag = null;
+function lubeSettled() { poseLubeStudio(); setFloor(true); rebuildShadowProxy(); markShadowDirty(); resetShadow(); updateLights(); requestRender(); }
+stage.addEventListener('pointerdown', (e) => {
+  if (!isLube() || comboOn() || e.button !== 0 || spaceDown) return;
+  const hit = lubeSim.pick(rayAt(e));
+  if (!hit) return;
+  e.stopPropagation(); e.preventDefault();
+  const floating = state.lube.arr === 'float' && lubeSim.world.gravity.y === 0;
+  // floating: across the view (a plane facing the camera); else held up off the floor (2 cm above where it was taken),
+  // or with ⌥ slid along it
+  const lift = floating || e.altKey ? 0 : 2;
+  if (floating) dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), hit.point);
+  else dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), hit.point.clone().setY(hit.point.y + lift));
+  lubeSim.startDrag(hit);
+  lubeDrag = { id: e.pointerId, lift, t0: performance.now(), from: hit.point.clone() };
+  try { stage.setPointerCapture(e.pointerId); } catch { /* gone */ }
+  stage.style.cursor = 'grabbing';
+}, { capture: true });
+stage.addEventListener('pointermove', (e) => {
+  if (!isLube() || comboOn()) return;
+  if (lubeDrag && e.pointerId === lubeDrag.id) {
+    e.stopPropagation();
+    if (!rayAt(e).ray.intersectPlane(dragPlane, hitP)) return;
+    // the lift comes in over a fifth of a second (not a jump up)
+    const k = Math.min(1, (performance.now() - lubeDrag.t0) / 200), p = hitP.clone();
+    if (lubeDrag.lift) p.y = lubeDrag.from.y + lubeDrag.lift * k;
+    lubeSim.dragTo(p);
+    return;
+  }
+  if (e.buttons || spaceDown) return;
+  const now = performance.now(); if (now - lubeHoverT < 70) return; lubeHoverT = now;
+  renderer.domElement.style.cursor = lubeSim.pick(rayAt(e)) ? 'grab' : '';
+}, { capture: true });
+let lubeHoverT = 0;
+const endLubeDrag = (e) => {
+  if (!lubeDrag || e.pointerId !== lubeDrag.id) return;
+  e.stopPropagation();
+  lubeSim.endDrag(); lubeDrag = null; stage.style.cursor = '';
+};
+stage.addEventListener('pointerup', endLubeDrag, { capture: true });
+stage.addEventListener('pointercancel', endLubeDrag, { capture: true });
+stage.addEventListener('wheel', (e) => {
+  if (!lubeDrag) return;
+  e.stopPropagation(); e.preventDefault();
+  lubeSim.turn((e.deltaY > 0 ? -1 : 1) * 10 * DEG);
+}, { capture: true, passive: false });
+$('#lube-drop').addEventListener('click', () => { state.lube.arr = 'pile'; setSeg('lubearr', 'pile'); lubeSim.drop(); lubeSettled(); if (!lubeLooked) { lubeLooked = true; frameLube(); } });
+let lubeLooked = false;
+$('#lube-reset').addEventListener('click', () => { if (state.lube.arr === 'pile') { lubeSim.drops--; lubeSim.drop(); } else lubeSim.arrange(state.lube.arr, state.lube.count); lubeSettled(); });   // (a pile: the same drop again)
+
 // ---------------------------------------------------------------- export
 function exportSize() {
   const asp = aspectValue();
@@ -2364,7 +2453,7 @@ async function renderToCanvas(W, H, transparent, onProgress) {
 }
 
 function shotSubject() {
-  return comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isPadBox() ? `sword-pad-box_${state.pb.lid === 'off' ? 'no-lid' : state.pb.lid}_${state.pb.pad ? 'pad' : 'empty'}${state.pb.paper && state.pb.lid !== 'closed' ? '_paper' : ''}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}${state.scaleTilt ? `_tilt-${Math.round(state.scaleTilt)}` : ''}` : isBloom() ? `pelvic-health-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBag() ? 'sword-travel-bag' : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-band-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `sword-pad_${state.stand ? 'stand' : state.pose}`;
+  return comboOn() ? `sword-${members().join('-')}` : isGluco() ? `sword-glucometer_${state.glPose}_${GLM.reading.value}` : isPadBox() ? `sword-pad-box_${state.pb.lid === 'off' ? 'no-lid' : state.pb.lid}_${state.pb.pad ? 'pad' : 'empty'}${state.pb.paper && state.pb.lid !== 'closed' ? '_paper' : ''}` : isBP() ? `sword-bp-monitor_${state.bpPose}_${BPM.reading.sys}-${BPM.reading.dia}` : isScale() ? `sword-scale_${state.scaleReading.replace(/[^0-9.-]/g, '') || 'blank'}${state.scaleTilt ? `_tilt-${Math.round(state.scaleTilt)}` : ''}` : isBloom() ? `pelvic-health-pod_${state.bloomLight ? 'light-on' : 'light-off'}` : isBag() ? 'sword-travel-bag' : isLube() ? `sword-lubricant_${state.lube.count}_${state.lube.arr}` : isBlock() ? `sword-yoga-block_${state.blockPose}` : isMBand() ? `sword-band_${state.mbandPose}` : isBands() ? `sword-bands_${bandsRig.keys().join('-')}_${bandsRig.opts.pouch ? 'pouch' : bandsRig.opts.pos === 'floating' ? bandsRig.opts.shape : bandsRig.opts.lay}` : isBox() ? `sword-band-box_${state.boxPose}` : isPhone() ? `vision-ai_${state.finish}_${state.pose}` : `sword-pad_${state.stand ? 'stand' : state.pose}`;
 }
 
 async function exportImage() {
@@ -2444,7 +2533,7 @@ function hideBusy() {
   $('#busy-text').textContent = 'Rendering…';
   requestRender();
 }
-if (new URLSearchParams(location.search).has('debug')) window.__studio = { deviceMoves, posePadBox, travelbag, TBM, frameBag, padbox, PBX, framePadBox, renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
+if (new URLSearchParams(location.search).has('debug')) window.__studio = { lube, lubeSim, LBM, frameLube, deviceMoves, posePadBox, travelbag, TBM, frameBag, padbox, PBX, framePadBox, renderToCanvas, comboMoved, placeCombo, members, comboBase, getStand: () => stand, tablet, obbsOf, boundsOfDevice, sidePush, bandsSolid, frame, frameBox, frameBands, frameMBand, frameBlock, block, BKM, BLOCK, bloom, BLM, frameBloom, scale, SCM, frameScale, setScaleReading, bp, BPM, frameBP, setBPReading, gluco, GLM, frameGluco, setGlucoReading, setupBands, applyPose, state, controls, camera, requestRender, phone, box, mband, MBM, bandsRig, LIGHTING, updateLights, renderer, THREE, liveShadow, accumulate, resetShadow, renderMain, groundMat };
 
 // ---------------------------------------------------------------- the devices' own moves, for videos
 // what a device can do itself, as a video's movement: its zip opening, its lid lifting, its display counting up, its
@@ -2575,6 +2664,17 @@ function deviceMoves() {
         act: (t) => lid(1 - sw(0.08, 0.94, t)), at: (t) => { const u = sw(0, 1, t); return { el: 8 * (1 - u), k: 1 + 0.1 * (1 - u) }; } },
     ];
   }
+  if (isLube()) {   // the sachets: dropped in from above, one after another, to rest (worked out ahead: every frame exact)
+    let rec = null;
+    const prep = () => { rec = lubeSim.record(5.2); };
+    const keep = { save: () => lubeSim.save(), restore: (s) => { lubeSim.restore(s); lubeSettled(); }, prep };
+    return [
+      { key: 'lube-drop', label: 'Drop in', dur: 6, ...keep, note: 'The sachets drop in from above, one after another, bounce and settle on the floor (real physics).',
+        act: (t) => { if (!rec) prep(); const u = Math.min(1, Math.max(0, (t - 0.04) / 0.9)); lubeSim.showFrame(rec.at(u), u >= 1); deviceMoved(); },
+        at: (t) => { const u = sw(0, 1, t); return { az: 6 * u, el: 4 * u, k: 1 - 0.05 * u }; },
+        done: () => { if (rec) { lubeSim.restore(rec.end); state.lube.arr = 'pile'; setSeg('lubearr', 'pile'); lubeSettled(); } } },
+    ];
+  }
   if (isScale()) {   // the scale: its display counting up to the reading, as someone steps on
     const text = state.scaleReading, m = String(text).replace(',', '.').match(/-?\d+(\.\d+)?/);
     if (!m) return [];
@@ -2652,7 +2752,7 @@ stand = standMesh;
 model.add(stand);
 applyPose();
 updateLights();
-if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else if (isBloom()) frameBloom(); else if (isBag()) frameBag(); else if (isScale()) frameScale(); else if (isBP()) frameBP(); else if (isGluco()) frameGluco(); else if (isPadBox()) framePadBox(); else frame(32, 14);   // a device may have been picked while the studio loaded
+if (isBox()) frameBox(); else if (isBands()) frameBands(); else if (isMBand()) frameMBand(); else if (isBlock()) frameBlock(); else if (isBloom()) frameBloom(); else if (isBag()) frameBag(); else if (isLube()) frameLube(); else if (isScale()) frameScale(); else if (isBP()) frameBP(); else if (isGluco()) frameGluco(); else if (isPadBox()) framePadBox(); else frame(32, 14);   // a device may have been picked while the studio loaded
 $('#busy').classList.remove('show');
 $('#busy-text').textContent = 'Rendering…';
 // open on a device from a link, e.g. ?device=bands (the Figma "Sword 3D Studio" card links each device this way)

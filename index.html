@@ -45,6 +45,8 @@
   <link rel="modulepreload" href="scale.js" />
   <link rel="modulepreload" href="bpmonitor.js" />
   <link rel="modulepreload" href="glucometer.js" />
+  <link rel="modulepreload" href="lube.js" />
+  <link rel="modulepreload" href="vendor/cannon-es.js" />
   <link rel="modulepreload" href="screens.js" />
   <link rel="modulepreload" href="scorebar.js" />
   <link rel="modulepreload" href="phoneui.js" />
@@ -113,6 +115,10 @@
             <button data-value="travelbag" role="radio">
               <svg viewBox="0 0 48 36" aria-hidden="true"><rect x="6.5" y="11" width="35" height="20" rx="5.5" class="d-body" /><path d="M10.5 11.4C16 9.6 32 9.6 37.5 11.4" class="d-line" /><path d="M41.2 16.5V24.5" class="d-line" /><rect x="40.2" y="22.5" width="2.4" height="5.5" rx="1" class="d-cap" /><circle cx="21" cy="21" r="1.3" class="d-line" /><path d="M23.6 21H28.5" class="d-line" /></svg>
               <span>Travel bag</span>
+            </button>
+            <button data-value="lube" role="radio">
+              <svg viewBox="0 0 48 36" aria-hidden="true"><g transform="translate(18.5 18.6) rotate(-24)"><path d="M-3 -14.5H3V-12.2L2.1 -11.3 3.3 -10.1 4.4 -9.7V14.5H-4.4V-9.7L-3.3 -10.1 -2.1 -11.3 -3 -12.2Z" class="d-body" /><path d="M-4.4 12.3H4.4" class="d-line" /></g><g transform="translate(26.5 18) rotate(-9)"><path d="M-3 -14.5H3V-12.2L2.1 -11.3 3.3 -10.1 4.4 -9.7V14.5H-4.4V-9.7L-3.3 -10.1 -2.1 -11.3 -3 -12.2Z" class="d-body" /><path d="M-4.4 12.3H4.4" class="d-line" /></g><g transform="translate(33.5 17.5)"><path d="M-3 -14.5H3V-12.2L2.1 -11.3 3.3 -10.1 4.4 -9.7V14.5H-4.4V-9.7L-3.3 -10.1 -2.1 -11.3 -3 -12.2Z" class="d-body" /><path d="M-4.4 12.3H4.4" class="d-line" /><path d="M-1.5 -9.8C-1.5 -12.2 1.5 -12.2 1.5 -9.8" class="d-line" /></g></svg>
+              <span>Lubricant</span>
             </button>
             <button data-value="box" role="radio">
               <svg viewBox="0 0 48 36" aria-hidden="true"><path d="M24 4.5 39.5 10.5V25.5L24 31.5 8.5 25.5V10.5Z" class="d-body" /><path d="M24 4.5 39.5 10.5 24 16.5 8.5 10.5Z" class="d-cap" /><path d="M24 16.5V31.5" class="d-line" /></svg>
@@ -277,6 +283,24 @@
             <button data-value="lying" title="Lying on its back, face up">Lying flat</button>
           </div>
         </div>
+        <div class="row hidden" id="lube-count-row">
+          <label>Sachets</label>
+          <div class="seg small" data-seg="lubecount"><button data-value="1">1</button><button data-value="2">2</button><button data-value="3" class="on">3</button></div>
+        </div>
+        <div class="row hidden" id="lube-arr-row">
+          <label>Arrangement</label>
+          <div class="seg small" data-seg="lubearr">
+            <button data-value="pile" class="on" title="Dropped onto the floor from a little above: they land across each other">Pile</button>
+            <button data-value="fan" title="Lying face up, fanned from their bottoms, one over the next">Fanned</button>
+            <button data-value="row" title="Lying face up, side by side">Row</button>
+            <button data-value="float" title="Upright and fanned in the air, as in the photo (no gravity: moved, they drift)">Floating</button>
+          </div>
+        </div>
+        <div class="row hidden" id="lube-act-row">
+          <label>Physics</label>
+          <div class="chips"><button id="lube-drop" title="Drop them again, each a different way">Drop again</button><button id="lube-reset" title="Back to the arrangement">Reset</button></div>
+        </div>
+        <p class="note hidden" id="lube-note">Drag a sachet in the view to pick it up: it hangs from where you hold it. Let go to drop it. ⌥-drag slides it along the floor; scroll while holding it to turn it.</p>
         <div class="slider hidden" id="tb-open-row"><label for="tb-open" title="The zip: from closed to all the way open">Opening <span id="tb-open-v"></span></label><input id="tb-open" type="range" min="0" max="1" step="0.005" value="0" /></div>
         <div class="slider hidden" id="gl-lean-row"><label for="gl-lean" title="How far it leans back (or, below 0, forward) as it stands">Lean <span id="gl-lean-v"></span></label><input id="gl-lean" type="range" min="-25" max="35" step="0.5" value="10" /></div>
         <div class="row hidden" id="gl-strip-row">
