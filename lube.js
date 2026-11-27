@@ -353,7 +353,7 @@ const G = 981;                   // cm/s²
 const STEP = 1 / 240;
 const NS = 49;                   // stations along the length, for the bend
 const DS = SACHET.L / (NS - 1);
-const STIFF = 120;               // EI over the weight per length (cm³): an end 7 cm out droops about 2.5 cm
+const STIFF = 48;                // EI over the weight per length (cm³): soft, a gel pack: an end 7 cm out would droop about 6 cm
 const stY = (j) => SACHET.L / 2 - j * DS;                // a station's y in the sachet's own frame (j = 0 the top)
 
 // the second-difference stiffness (D2ᵀD2: free ends), banded: M[j][k - j + 2], k = j-2 .. j+2
@@ -413,16 +413,17 @@ export class LubeSim {
     w.solver.iterations = 30;
     w.solver.tolerance = 1e-6;
     const mat = new CANNON.Material('foil');
-    Object.assign(w.defaultContactMaterial, { friction: 0.34, restitution: 0.02, contactEquationStiffness: 5e6, contactEquationRelaxation: 4, frictionEquationStiffness: 5e6 });
+    // (soft: a low contact stiffness and a long relaxation, so they meet with a soft give and no bounce, and a little grip)
+    Object.assign(w.defaultContactMaterial, { friction: 0.42, restitution: 0, contactEquationStiffness: 9e5, contactEquationRelaxation: 7, frictionEquationStiffness: 9e5, frictionEquationRelaxation: 6 });
     this.floor = new CANNON.Body({ mass: 0, type: CANNON.Body.STATIC, material: mat });
     this.floor.addShape(new CANNON.Plane());
     this.floor.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
     w.addBody(this.floor);
-    // a sachet: the filled body as thick as it is in its middle (its sides thinner: side boxes), the head tab and the
-    // bottom seal plates at its mid-plane
-    const Th = T_HALF * MM * 0.95, yTop = (LEN / 2 - 19) * MM, yBot = (LEN / 2 - GEL_BOTTOM) * MM, hl = (yTop - yBot) / 2, yc = (yTop + yBot) / 2;
+    // a sachet: the filled body as thick as it is when it rests, its underside flattened (the gel gives: 4.2 mm, not
+    // 5.5), its sides round, the head tab and the bottom seal plates at its mid-plane
+    const Th = 0.21, yTop = (LEN / 2 - 19) * MM, yBot = (LEN / 2 - GEL_BOTTOM) * MM, hl = (yTop - yBot) / 2, yc = (yTop + yBot) / 2;
     this.bodies = sachets.map(() => {
-      const b = new CANNON.Body({ mass: 1, material: mat, linearDamping: 0.12, angularDamping: 0.25, allowSleep: true, sleepSpeedLimit: 0.35, sleepTimeLimit: 0.5 });   // (looser, and one starting to topple slowly went to sleep leaning)
+      const b = new CANNON.Body({ mass: 1, material: mat, linearDamping: 0.16, angularDamping: 0.42, allowSleep: true, sleepSpeedLimit: 0.35, sleepTimeLimit: 0.5 });   // (looser, and one starting to topple slowly went to sleep leaning)
       b.addShape(new CANNON.Box(new CANNON.Vec3(1.32, hl, Th)), new CANNON.Vec3(0, yc, 0));
       // its sides round (a row of small balls each side, not a box's edge: on a box's edge it could stand up, leaning on
       // another, as no gel pack would)
@@ -434,7 +435,7 @@ export class LubeSim {
       return b;
     });
     // each sachet's bend: u (cm) at each station, along d (its face that is downward)
-    this.bend = sachets.map(() => ({ u: new Float64Array(NS), free: new Float64Array(NS), d: new THREE.Vector3(), s: 1, on: false, shown: -1 }));
+    this.bend = sachets.map(() => ({ u: new Float64Array(NS), free: new Float64Array(NS).fill(9), press: new Float64Array(NS), d: new THREE.Vector3(), s: 1, on: false, shown: -1 }));
     this.count = 3; this.arr = 'pile'; this.drops = 0;
     this.acc = 0; this.last = 0; this.drag = null; this.awake = false;
     this.jointBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
@@ -444,7 +445,7 @@ export class LubeSim {
     this.arrange('pile', 3, { settle: true });
   }
   active() { return this.bodies.slice(0, this.count); }
-  setGravity(on) { this.world.gravity.set(0, on ? -G : 0, 0); for (const b of this.bodies) { b.linearDamping = on ? 0.12 : 0.85; b.angularDamping = on ? 0.25 : 0.9; } }
+  setGravity(on) { this.world.gravity.set(0, on ? -G : 0, 0); for (const b of this.bodies) { b.linearDamping = on ? 0.16 : 0.85; b.angularDamping = on ? 0.42 : 0.9; } }   // (a soft pack hardly spins)
   place(i, p, e) {
     const b = this.bodies[i]; _q.setFromEuler(_e.set(e[0], e[1], e[2], 'YXZ'));
     b.position.set(p[0], p[1], p[2]); b.quaternion.set(_q.x, _q.y, _q.z, _q.w);
@@ -547,7 +548,7 @@ export class LubeSim {
     const down = ez.y > 0 ? -1 : 1;                     // its downward face: the back (-z) when its front is up
     const d = ez.clone().multiplyScalar(down), g = -d.y;  // (g: how much of its weight bends it: 1 lying flat, 0 on edge)
     B.d.copy(d); B.s = down;
-    if (this.world.gravity.y === 0 || g < 0.25 || (this.drag && this.drag.i === i)) { if (B.on) { B.u.fill(0); B.on = false; } return; }
+    if (this.world.gravity.y === 0 || g < 0.25 || (this.drag && this.drag.i === i)) { B.free.fill(9); if (B.on) { B.u.fill(0); B.on = false; } return; }
     const P = new THREE.Vector3();
     let minFree = Infinity;
     for (let j = 0; j < NS; j++) {
@@ -588,28 +589,38 @@ export class LubeSim {
   }
   // the bend applied to a sachet's meshes (its own frame: its faces moved along their normal, their normals tipped)
   bendMesh(i) {
-    const B = this.bend[i], u = B.u, s = B.s;
+    const B = this.bend[i], u = B.u, s = B.s, fr = B.free, pr = B.press, ZC = 0.205;
     for (const S of this.skins[i]) {
       const P = S.geo.attributes.position.array, N = S.geo.attributes.normal.array, R0 = S.rest, N0 = S.restN, n = P.length / 3;
-      let umax = 0;
+      let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
       for (let v = 0; v < n; v++) {
         const j = S.st[v], f = S.fr[v], uj = B.on ? u[j] * (1 - f) + u[j + 1] * f : 0;
         // the slope (d(offset)/dy: stations run down the length)
         const sl = B.on ? (-s * (u[j + 1] - u[j])) / DS : 0;
-        P[3 * v] = R0[3 * v]; P[3 * v + 1] = R0[3 * v + 1]; P[3 * v + 2] = R0[3 * v + 2] + s * uj;
+        // the gel gives: where it rests on something its underside flattens and its top swells a little; where another lies
+        // on it, its top is pressed in
+        let z = R0[3 * v + 2];
+        const az = Math.abs(z);
+        if (az > 0.1) {
+          const ct = 1 - Math.min(1, (fr[j] * (1 - f) + fr[j + 1] * f) / 0.05), pj = pr[j] * (1 - f) + pr[j + 1] * f;
+          if (z * s > 0) { if (ct > 0 && az > ZC) z = Math.sign(z) * (ZC + (az - ZC) * (1 - 0.75 * ct)); }
+          else z = Math.sign(z) * (az + 0.34 * Math.max(0, az - ZC) * ct - pj * 0.3 * Math.max(0, az - 0.06));
+        }
+        const X = R0[3 * v], Y = R0[3 * v + 1], Z = z + s * uj;
+        P[3 * v] = X; P[3 * v + 1] = Y; P[3 * v + 2] = Z;
+        if (X < x0) x0 = X; if (X > x1) x1 = X; if (Y < y0) y0 = Y; if (Y > y1) y1 = Y; if (Z < z0) z0 = Z; if (Z > z1) z1 = Z;
         const cs = 1 / Math.sqrt(1 + sl * sl), sn = sl * cs, ny = N0[3 * v + 1], nz = N0[3 * v + 2];
         N[3 * v] = N0[3 * v]; N[3 * v + 1] = ny * cs - nz * sn; N[3 * v + 2] = ny * sn + nz * cs;
-        if (uj > umax) umax = uj;
       }
       S.geo.attributes.position.needsUpdate = true; S.geo.attributes.normal.needsUpdate = true;
-      const bb = S.geo.boundingBox.copy(S.box0); bb.min.z -= umax; bb.max.z += umax;
+      const bb = S.geo.boundingBox; bb.min.set(x0, y0, z0); bb.max.set(x1, y1, z1);   // (exact: the floor is set by it)
       if (!S.geo.boundingSphere) S.geo.boundingSphere = new THREE.Sphere();
       bb.getBoundingSphere(S.geo.boundingSphere);
     }
   }
   // the meshes put where the bodies are, bent (lowest first: each lies on those under it); at rest, contact shading too
   sync(atRest = !this.awake && !this.drag) {
-    const order = this.active().map((b, i) => i).sort((a, b) => this.bodies[a].position.y - this.bodies[b].position.y), done = [];
+    const order = this.active().map((b, i) => i).sort((a, b) => this.bodies[a].position.y - this.bodies[b].position.y), done = [], redo = new Set();
     for (const i of order) {
       const b = this.bodies[i], s = this.sachets[i];
       s.position.set(b.position.x, b.position.y, b.position.z); s.quaternion.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
@@ -618,10 +629,41 @@ export class LubeSim {
         const before = this.bend[i].u.slice(), wasOn = this.bend[i].on;
         this.drape(i, done.flat(), atRest ? 1400 : 220);
         let ch = wasOn !== this.bend[i].on; for (let j = 0; j < NS && !ch; j++) if (Math.abs(before[j] - this.bend[i].u[j]) > 2e-4) ch = true;
-        if (ch || this.bend[i].shown < 0) { this.bendMesh(i); this.bend[i].shown = 1; }
+        if (ch || this.bend[i].shown < 0) redo.add(i);
       }
       done.push(this.stationBoxes(i));
     }
+    // how hard each is pressed by the ones lying on it (its top face within 2 mm of another)
+    const all = order.map((i, k) => [i, done[k]]);
+    for (const i of order) {
+      const B = this.bend[i], b = this.bodies[i], q = new THREE.Quaternion(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
+      const ey = new THREE.Vector3(0, 1, 0).applyQuaternion(q), up = B.d.clone().negate(), P = new THREE.Vector3();
+      const others = all.filter(([k]) => k !== i).flatMap(([, bx]) => bx);
+      let ch = false;
+      for (let j = 0; j < NS; j++) {
+        let t = 0.2;
+        if (this.world.gravity.y !== 0 && others.length) {
+          P.copy(b.position).addScaledVector(ey, stY(j)).addScaledVector(B.d, B.on ? B.u[j] : 0).addScaledVector(up, ACROSS[j].th);
+          for (const o of others) {
+            const rx = P.x - o.c.x, ry = P.y - o.c.y, rz = P.z - o.c.z;
+            if (rx * rx + ry * ry + rz * rz > 9) continue;
+            let t0 = 0, t1 = t, hit = true;
+            for (let k = 0; k < 3; k++) {
+              const a = o.ax[k], p = rx * a.x + ry * a.y + rz * a.z, v = up.x * a.x + up.y * a.y + up.z * a.z, h2 = o.h[k];
+              if (Math.abs(v) < 1e-9) { if (Math.abs(p) > h2) { hit = false; break; } continue; }
+              let ta = (-h2 - p) / v, tb = (h2 - p) / v; if (ta > tb) { const tt = ta; ta = tb; tb = tt; }
+              if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) { hit = false; break; }
+            }
+            if (hit) t = Math.min(t, t0);
+          }
+        }
+        const pj = 1 - t / 0.2;
+        if (Math.abs(pj - B.press[j]) > 0.02) ch = true;
+        B.press[j] = pj;
+      }
+      if (ch) redo.add(i);
+    }
+    for (const i of redo) { this.bendMesh(i); this.bend[i].shown = 1; }
     const box = this.box.makeEmpty();
     for (let i = 0; i < this.count; i++) { this.sachets[i].updateMatrixWorld(true); for (const m of this.sachets[i].children) box.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrix.clone().premultiply(this.sachets[i].matrix))); }
     if (atRest) this.contactShade();
@@ -711,9 +753,10 @@ export class LubeSim {
     const b = this.bodies[i];
     const local = b.quaternion.inverse().vmult(new CANNON.Vec3(point.x - b.position.x, point.y - b.position.y, point.z - b.position.z));
     this.jointBody.position.set(point.x, point.y, point.z);
-    const c = new CANNON.PointToPointConstraint(b, local, this.jointBody, new CANNON.Vec3(0, 0, 0), 2.5e4);
+    // (a gentle hand: it follows a touch behind, and pushes the others aside softly)
+    const c = new CANNON.PointToPointConstraint(b, local, this.jointBody, new CANNON.Vec3(0, 0, 0), 1.1e4);
     this.world.addConstraint(c);
-    b.angularDamping = 0.7; b.linearDamping = 0.4;
+    b.angularDamping = 0.85; b.linearDamping = 0.5;
     for (const o of this.active()) o.wakeUp();
     this.drag = { i, c, pivot: point.clone() };
     this.wake();
@@ -729,9 +772,9 @@ export class LubeSim {
     if (!this.drag) return;
     const b = this.bodies[this.drag.i];
     this.world.removeConstraint(this.drag.c);
-    const v = b.velocity.length(); if (v > 150) b.velocity.scale(150 / v, b.velocity);
+    const v = b.velocity.length(); if (v > 100) b.velocity.scale(100 / v, b.velocity);
     const floating = this.world.gravity.y === 0;
-    b.angularDamping = floating ? 0.9 : 0.25; b.linearDamping = floating ? 0.85 : 0.12;
+    b.angularDamping = floating ? 0.9 : 0.42; b.linearDamping = floating ? 0.85 : 0.16;
     this.drag = null;
     if (wake) { this.wake(); for (const o of this.active()) o.wakeUp(); }
   }
