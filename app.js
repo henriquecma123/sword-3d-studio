@@ -1368,6 +1368,7 @@ function loop() {
   // the sachets falling, pushed or held: the view and their floor shadow follow; once they rest, a full shadow
   if (members().includes('lube') && !videoFrames) {   // (in a combined shot too: the devices solid to them)
     const was = lubeMoving;
+    lubeCarry();
     lubeMoving = lubeSim.step();
     if (lubeMoving) { markShadowDirty(); syncProxyParts(); resetShadow(true); }
     else if (was) { markShadowDirty(); syncProxyParts(); resetShadow(); }
@@ -2431,7 +2432,7 @@ stage.addEventListener('pointerdown', (e) => {
   // slid along at the height it was taken
   if (floating) dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), hit.point);
   lubeSim.startDrag({ i: hit.i, point: lube.worldToLocal(hit.point.clone()) });
-  lubeDrag = { id: e.pointerId, i: hit.i, floating, slide: e.altKey, H: hit.point.y, from: hit.point.clone() };
+  lubeDrag = { id: e.pointerId, i: hit.i, floating, slide: e.altKey, H: hit.point.y, want: hit.point.y, from: hit.point.clone(), ray: rayAt(e).ray.clone(), t: performance.now() };
   try { stage.setPointerCapture(e.pointerId); } catch { /* gone */ }
   stage.style.cursor = 'grabbing';
 }, { capture: true });
@@ -2439,25 +2440,14 @@ stage.addEventListener('pointermove', (e) => {
   if (!members().includes('lube')) return;
   if (lubeDrag && e.pointerId === lubeDrag.id) {
     e.stopPropagation();
-    const r = rayAt(e);
-    let p;
-    if (lubeDrag.floating || lubeDrag.slide) {
-      if (!lubeDrag.floating) dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, lubeDrag.H, 0));
-      if (!r.ray.intersectPlane(dragPlane, hitP)) return;
-      p = lube.worldToLocal(hitP.clone());
-    } else {
-      // carried: over the surface the pointer is on (the floor, a device's top, through the bag's open mouth to what is in
-      // it), its lowest point 1.2 cm above it; the height eased (no jumps)
-      // (under the pointer at the height it is carried at; that height eased towards what clears everything under its
-      // footprint, there and on the way)
-      dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, lubeDrag.H, 0));
-      if (!r.ray.intersectPlane(dragPlane, hitP)) return;
-      const at = lube.worldToLocal(hitP.clone());
-      const reach = Math.max(0.3, lubeDrag.H - lubeSim.lowOf(lubeDrag.i)), want = lubeSim.clearance(lubeDrag.i, at.x, at.z) + 1.2 + reach;
-      lubeDrag.H += (want - lubeDrag.H) * 0.35;
-      p = new THREE.Vector3(at.x, lubeDrag.H, at.z);
+    lubeDrag.ray.copy(rayAt(e).ray);
+    // carried: how high it must go to clear everything under its footprint, there and on the way (the height itself is
+    // eased each frame, in lubeCarry)
+    if (!lubeDrag.floating && !lubeDrag.slide && lubeAt(lubeDrag.H)) {
+      const reach = Math.max(0.3, lubeSim.drag.pivot.y - lubeSim.lowOf(lubeDrag.i));   // (how far it hangs below the fingers, as it is now)
+      lubeDrag.want = lubeSim.clearance(lubeDrag.i, lubeAtP.x, lubeAtP.z) + 1.2 + reach;
     }
-    lubeSim.dragTo(p);
+    lubeCarry();
     return;
   }
   if (e.buttons || spaceDown || comboOn()) return;   // (combined: the shot's own hover)
@@ -2465,6 +2455,22 @@ stage.addEventListener('pointermove', (e) => {
   renderer.domElement.style.cursor = lubeSim.pick(rayAt(e)) ? 'grab' : '';
 }, { capture: true });
 let lubeHoverT = 0;
+// where the pointer's ray meets the level at height H (this group's frame), into lubeAtP
+const lubeAtP = new THREE.Vector3();
+function lubeAt(H) {
+  dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, H, 0));
+  if (!lubeDrag.ray.intersectPlane(dragPlane, hitP)) return false;
+  lubeAtP.copy(lube.worldToLocal(hitP.clone())); return true;
+}
+// each frame while one is held: its height eased towards what clears what's under it (quickly up, gently down), and
+// the hand put under the pointer there: smooth however unevenly the pointer's moves come
+function lubeCarry() {
+  if (!lubeDrag) return;
+  const now = performance.now(), dt = Math.min(0.05, (now - lubeDrag.t) / 1000); lubeDrag.t = now;
+  if (lubeDrag.floating) { if (lubeDrag.ray.intersectPlane(dragPlane, hitP)) lubeSim.dragTo(lube.worldToLocal(hitP.clone())); return; }
+  if (!lubeDrag.slide) lubeDrag.H += (lubeDrag.want - lubeDrag.H) * (1 - Math.exp(-dt / (lubeDrag.want > lubeDrag.H ? 0.06 : 0.16)));
+  if (lubeAt(lubeDrag.H)) lubeSim.dragTo(new THREE.Vector3(lubeAtP.x, lubeDrag.H, lubeAtP.z));
+}
 const endLubeDrag = (e) => {
   if (!lubeDrag || e.pointerId !== lubeDrag.id) return;
   e.stopPropagation();
@@ -2475,7 +2481,10 @@ stage.addEventListener('pointercancel', endLubeDrag, { capture: true });
 stage.addEventListener('wheel', (e) => {
   if (!lubeDrag) return;
   e.stopPropagation(); e.preventDefault();
-  lubeSim.turn((e.deltaY > 0 ? -1 : 1) * 7.5 * DEG);   // (fine enough to line one up with the bag's mouth)
+  // (a mouse's notch turns it 7.5°, fine enough to line one up with the bag's mouth; a trackpad, by as little as you
+  // like; either way it turns there smoothly)
+  const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+  lubeSim.turn(-Math.max(-1, Math.min(1, d / 100)) * 7.5 * DEG);
 }, { capture: true, passive: false });
 $('#lube-drop').addEventListener('click', () => { state.lube.arr = 'pile'; setSeg('lubearr', 'pile'); lubeSim.drop(); lubeSettled(); if (!lubeLooked) { lubeLooked = true; frameLube(); } });
 let lubeLooked = false;
