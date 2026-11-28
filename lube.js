@@ -148,8 +148,10 @@ const para = (u) => (u >= 1 ? 1 : u <= 0 ? 0 : 1 - (1 - u) * (1 - u));
 function puff(x, y, w) {
   const d = gelDist(x, y);
   if (d <= 0) return { h: 0, d };
-  const S = THREE.MathUtils.smoothstep, re = 8.5 - 2 * S(y, 14, 28) - 2.9 * S(y, 60, 100);   // (smoothly: a step here showed as a line)                        // the long slope up from the top seal; a quick one off the bottom
-  const pe = 0.45 * circ(d / re) + 0.55 * para(d / re);
+  const S = THREE.MathUtils.smoothstep, re = 8.5 - 2 * S(y, 14, 28) - 2.2 * S(y, 60, 100);   // (off the bottom seal: 4.3 mm; quicker read as a hard ledge)   // (smoothly: a step here showed as a line)                        // the long slope up from the top seal; a quick one off the bottom
+  // off the seal the film curves up smoothly (no kink: a vertical start, sampled by a grid running across the seal's
+  // edge at an angle, combed it into teeth); full a little sooner
+  const u = Math.min(1, d / (re * 0.85)), sm = u * u * (3 - 2 * u), pe = 1 - Math.pow(1 - sm, 1.7);
   const side = Math.max(0, w - Math.abs(x)), ps = circ(side / 3.4);   // the body's sides: round folds
   const neck = 0.58 + 0.42 * THREE.MathUtils.smoothstep(y, 13, 24);   // the gel in the neck: a low, soft tongue
   const dome = 1 - 0.22 * (x / BODY) * (x / BODY);
@@ -158,25 +160,57 @@ function puff(x, y, w) {
 
 // a sachet: front, back and the thin edge round them, plus the back's fin seal. seed: its own creases and warp
 export function buildSachetGeometry(seed = 1) {
-  const ys = rowsY(), nr = ys.length, nc = NCOL, n = nr * nc;
   const Wf = creasesFor(seed * 7 + 1), Wb = creasesFor(seed * 7 + 4), Rw = rng(seed * 13 + 5);
   // a gentle warp of the whole sachet (a bend along it, a slight twist): no sachet lies quite flat
   const bend = (Rw() - 0.5) * 0.8, twist = (Rw() - 0.5) * 0.02, tip = (Rw() - 0.5) * 1.4, cup = 0.3 + Rw() * 0.35;   // (how it bends along its length is the physics' now: its joints)
   // (bend: the ends lifted or dropped up to 3 mm; cup: the sides a little forward, as the filled tube rounds itself)
   const warp = (x, y) => bend * ((y - LEN / 2) / (LEN / 2)) ** 2 + twist * x * (y - LEN / 2) / 10 + (y < 9 ? tip * ((9 - y) / 9) ** 2 : 0) + cup * (x / BODY) ** 2;
-  const pos = new Float32Array((2 * n + 2 * (2 * (nr + nc))) * 3), uv = new Float32Array(pos.length / 3 * 2), seal = new Float32Array(pos.length / 3);
-  const P = (i, x, y, z, s) => { pos[3 * i] = x * MM; pos[3 * i + 1] = (LEN / 2 - y) * MM; pos[3 * i + 2] = z * MM; uv[2 * i] = x / 5; uv[2 * i + 1] = (LEN / 2 - y) / 5; seal[i] = s; };
-  const hF = new Float32Array(n), hB = new Float32Array(n);
+
+  // the back seam (a fin seal): the tube's two edges sealed face to face into a strip 8 mm wide, folded flat to one
+  // side and lying on the back, running its whole length. Not a separate piece laid on it: the back itself, raised by
+  // the strip's two films. At its root it rolls over (the fold); its other edge is the cut, a crisp step. Through the
+  // top and bottom seals it is crushed flat with them
+  const FW = 8.2, fx0 = -1.2 + (Rw() - 0.5) * 0.6, fx1 = fx0 + FW, fph = Rw() * 6.3;
+  const FT = 0.17;   // mm: the strip's thickness (two films and their seal)
+  const finAt = (x, y, sealK) => {
+    const t = x - fx0;
+    if (t < 0 || t > FW + 0.04 || Math.abs(x) > halfWidth(y) - 0.35) return 0;   // (the whole length, up into the head tab: inside its outline)
+    let h;
+    if (t < 0.32) h = FT * Math.sqrt(Math.max(0, 1 - ((0.32 - t) / 0.32) ** 2));   // the fold, rolling over
+    else if (t > FW - 0.05) h = FT * Math.max(0, 1 - (t - (FW - 0.05)) / 0.09);     // the cut edge
+    else h = FT * (1 + 0.06 * Math.sin(y * 0.55 + fph) * Math.sin(t * 0.8));        // (its films not quite even)
+    return h * (1 - 0.55 * sealK);   // (crushed in the end seals)
+  };
+  // columns across: closer at the folds, and gathered where the seam's fold and cut edge fall (on the body, 20 mm half
+  // width, they are fixed in x)
+  const S0 = []; for (let j = 0; j < NCOL; j++) S0.push(Math.sin((Math.PI / 2) * ((j / (NCOL - 1)) * 2 - 1)));
+  for (const dx of [-0.25, 0, 0.08, 0.16, 0.24, 0.32, 0.5]) S0.push((fx0 + dx) / BODY);
+  for (const dx of [-0.4, -0.15, -0.06, -0.02, 0.03, 0.09, 0.3]) S0.push((fx1 + dx) / BODY);
+  const SC = [...new Set(S0.map((v) => +v.toFixed(5)))].sort((p, q) => p - q);
+  const ys = rowsY(), nr = ys.length, nc = SC.length, n = nr * nc;
+
+  const pos = new Float32Array((2 * n + 2 * (2 * (nr + nc))) * 3), uv = new Float32Array(pos.length / 3 * 2), seal = new Float32Array(pos.length / 3), cav = new Float32Array(pos.length / 3).fill(1);
+  const P = (i, x, y, z, s, cv = 1) => { pos[3 * i] = x * MM; pos[3 * i + 1] = (LEN / 2 - y) * MM; pos[3 * i + 2] = z * MM; uv[2 * i] = x / 10; uv[2 * i + 1] = (LEN / 2 - y) / 10; seal[i] = s; cav[i] = cv; };
   for (let r = 0; r < nr; r++) {
     const y = ys[r], w = halfWidth(y);
     for (let c = 0; c < nc; c++) {
-      const x = colS(c) * w, i = r * nc + c, { h, d } = puff(x, y, w);
-      const gel = Math.min(1, h / (0.35 * T_HALF)), s = 1 - THREE.MathUtils.smoothstep(d, -0.12, 0.3);
+      const x = SC[c] * w, i = r * nc + c, { h, d } = puff(x, y, w);
+      const gel = Math.min(1, h / (0.35 * T_HALF));
+      // the crimp stops just short of the seal's edge, which the jaws leave as a slight bead; beside it the film puckers
+      const s = 1 - THREE.MathUtils.smoothstep(d, -1.1, -0.1);   // (over a millimetre: narrower than the mesh, it frayed into teeth)
+      const bead = 0.035 * Math.exp(-(((d + 0.3) / 0.38) ** 2));
+      const along = x * 0.8 + y * 0.6, puck = d > 0.15 && (y > 19.5 || y > GEL_BOTTOM - 8) ? 0.07 * (1 - Math.exp(-(d - 0.15) / 0.3)) * Math.exp(-d / 1.1) * Math.sin(along * 2.55 + 1.7 * Math.sin(along * 0.37 + seed)) * (0.6 + 0.4 * Math.sin(along * 0.21 + seed * 2)) : 0;
       const edge = c === 0 || c === nc - 1;
-      const f = edge ? FILM : Math.max(FILM, h - gel * creaseAt(Wf, x, y)), b = edge ? FILM : Math.max(FILM, h - gel * creaseAt(Wb, -x, y));
-      hF[i] = f; hB[i] = b;
+      const f = edge ? FILM : Math.max(FILM, h - gel * creaseAt(Wf, x, y)) + bead + puck;
+      const fin = edge ? 0 : finAt(x, y, 1 - THREE.MathUtils.smoothstep(d, -0.3, 0.6));
+      const b = edge ? FILM : Math.max(FILM, h - gel * creaseAt(Wb, -x, y)) + bead + puck * 0.8 + fin;
+      // the creases' and the seam's shade: in the fold's crease, and in the step's shadow just past the cut edge
+      const t = x - fx0, inFin = t > -0.6 && t < FW + 0.8 && Math.abs(x) < halfWidth(y) - 0.2;
+      const cvB = inFin ? (1 - 0.18 * Math.exp(-(t * t) / 0.03)) * (1 - 0.22 * Math.exp(-(((t - FW - 0.12) / 0.16) ** 2))) : 1;
+      const cvS = 1 - 0.06 * Math.exp(-(((d - 0.05) / 0.22) ** 2));   // (the seal's edge: the film tucks in there)
       const wz = warp(x, y);
-      P(i, x, y, wz + f, s); P(n + i, x, y, wz - b, s);
+      P(i, x, y, wz + f, s, cvS);
+      P(n + i, x, y, wz - b, Math.max(s, fin > 0.02 ? Math.min(1, (t - 0.25) / 0.2) * Math.min(1, (FW - 0.1 - t) / 0.15) : 0), cvS * cvB);
     }
   }
   const idx = [];
@@ -194,7 +228,7 @@ export function buildSachetGeometry(seed = 1) {
   let k = 2 * n;
   const rim0 = k;
   for (const i of loop) {
-    for (const src of [i, n + i]) { pos[3 * k] = pos[3 * src]; pos[3 * k + 1] = pos[3 * src + 1]; pos[3 * k + 2] = pos[3 * src + 2]; uv[2 * k] = uv[2 * src]; uv[2 * k + 1] = uv[2 * src + 1]; seal[k] = seal[src] > 0.5 ? 2 : 1; k++; }
+    for (const src of [i, n + i]) { pos[3 * k] = pos[3 * src]; pos[3 * k + 1] = pos[3 * src + 1]; pos[3 * k + 2] = pos[3 * src + 2]; uv[2 * k] = uv[2 * src]; uv[2 * k + 1] = uv[2 * src + 1]; seal[k] = seal[src] > 0.5 ? 2 : 1; cav[k] = 0.85; k++; }
   }
   const L = loop.length;
   for (let q = 0; q < L; q++) {
@@ -205,58 +239,38 @@ export function buildSachetGeometry(seed = 1) {
   geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, 3 * k), 3));
   geo.setAttribute('uv', new THREE.BufferAttribute(uv.subarray(0, 2 * k), 2));
   geo.setAttribute('aSeal', new THREE.BufferAttribute(seal.subarray(0, k), 1));
+  geo.setAttribute('aCav', new THREE.BufferAttribute(cav.subarray(0, k), 1));
   geo.setIndex(idx);
   geo.computeVertexNormals();
   geo.computeBoundingBox(); geo.computeBoundingSphere();
   geo.userData.grid = { nr, nc };   // (two small numbers: the contact shading samples every other row and column)
-
-  // the fin seal down the back: a strip of the two films sealed face to face, folded flat to one side and lying on the
-  // back's curve, from under the top seal to the bottom edge
-  const fx0 = -0.8 + (Rw() - 0.5) * 0.6, fx1 = fx0 + 8.2, fy0 = 18.6, fr = ys.filter((y) => y >= fy0), fc = 9;
-  const fpos = [], fuv = [], fseal = [], fidx = [];
-  const backAt = (x, y) => { const w = halfWidth(y), { h, d } = puff(x, y, w); const gel = Math.min(1, h / (0.35 * T_HALF)); return Math.max(FILM, h - gel * creaseAt(Wb, -x, y)) + (d > 0 ? 0 : 0); };
-  const fin = (x, y, up) => { const z = warp(x, y) - backAt(x, y) - (up ? 0.17 : 0.01); fpos.push(x * MM, (LEN / 2 - y) * MM, z * MM); fuv.push(x / 5 + 0.37, (LEN / 2 - y) / 5); fseal.push(1); };
-  const nfr = fr.length;
-  for (const y of fr) for (let c = 0; c < fc; c++) fin(fx0 + (fx1 - fx0) * (c / (fc - 1)), y, true);
-  for (let r = 0; r < nfr - 1; r++) for (let c = 0; c < fc - 1; c++) { const a = r * fc + c, b = a + 1, cc = a + fc, d = cc + 1; fidx.push(a, b, cc, b, d, cc); }   // facing back (-z)
-  // its two long edges and its top end, down to the back
-  const base = fpos.length / 3;
-  const edgeStrip = (pts) => {   // pts: [x, y] along an edge, in order
-    const b0 = fpos.length / 3;
-    for (const [x, y] of pts) { fin(x, y, true); fin(x, y, false); }
-    for (let q = 0; q < pts.length - 1; q++) { const A = b0 + 2 * q, B = A + 1, C = A + 2, D = A + 3; fidx.push(A, C, B, C, D, B, A, B, C, C, B, D); }   // (both ways: a ledge 0.16 mm high)
-  };
-  edgeStrip(fr.map((y) => [fx0, y]));
-  edgeStrip(fr.map((y) => [fx1, y]));
-  edgeStrip(Array.from({ length: fc }, (_, c) => [fx0 + (fx1 - fx0) * (c / (fc - 1)), fy0]));
-  void base;
-  const fgeo = new THREE.BufferGeometry();
-  fgeo.setAttribute('position', new THREE.Float32BufferAttribute(fpos, 3));
-  fgeo.setAttribute('uv', new THREE.Float32BufferAttribute(fuv, 2));
-  fgeo.setAttribute('aSeal', new THREE.Float32BufferAttribute(fseal, 1));
-  fgeo.setIndex(fidx);
-  fgeo.computeVertexNormals();
-  return { body: geo, fin: fgeo };
+  return { body: geo };
 }
 
 // ---------------------------------------------------------------- materials
 // the crimp: fine diamond knurl, square pyramids on a 45° lattice 1.25 mm apart, a little rounded. A normal map, its
 // height in alpha (the grooves darken a touch)
 function knurlTexture(maxAniso) {
-  const S = 256, N = 4, data = new Uint8Array(S * S * 4);
+  // 8 cells to a 10 mm tile (1.25 mm apart), 64 px a cell: rounded pyramids (their tops and the grooves between them
+  // soft, as an embossing roller leaves them in foil), each a touch higher or lower than the next, the grooves' floors
+  // a little uneven
+  const S = 512, N = 8, data = new Uint8Array(S * S * 4), R = rng(77);
+  const cellH = new Float32Array(N * N).map(() => 0.82 + 0.36 * R());
+  const sm = (t) => t * t * (3 - 2 * t);
   const hgt = (u, v) => {
-    const f = ((N * (u + v)) % 1 + 1) % 1 - 0.5, g = ((N * (u - v)) % 1 + 1) % 1 - 0.5;
-    const m = Math.pow(Math.pow(Math.abs(f), 6) + Math.pow(Math.abs(g), 6), 1 / 6);   // a rounded square
-    return Math.max(0, 1 - m * 2.1);
+    const a = N * (u + v), b = N * (u - v), ia = Math.floor(a), ib = Math.floor(b);
+    const f = a - ia - 0.5, g = b - ib - 0.5;
+    const m = Math.pow(Math.pow(Math.abs(f), 4) + Math.pow(Math.abs(g), 4), 1 / 4);   // a rounded square, 45° turned
+    const k = cellH[(((ia % N) + N) % N) * N + (((ib % N) + N) % N)];
+    return k * sm(Math.max(0, Math.min(1, 1 - m * 2.05)));
   };
-  const e = 1 / S;
+  const e = 1 / S, s = 0.011;   // (the pyramids' height, in tile units: about 0.11 mm)
   for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
     const u = (i + 0.5) / S, v = (j + 0.5) / S, h = hgt(u, v);
     const dx = (hgt(u + e, v) - hgt(u - e, v)) / (2 * e), dy = (hgt(u, v + e) - hgt(u, v - e)) / (2 * e);
-    const s = 0.03;   // the pyramids' height, in tile units (5 mm): about 0.15 mm
     let nx = -dx * s, ny = -dy * s, nz = 1; const l = Math.hypot(nx, ny, nz); nx /= l; ny /= l; nz /= l;
     const o = 4 * (j * S + i);
-    data[o] = Math.round((nx * 0.5 + 0.5) * 255); data[o + 1] = Math.round((ny * 0.5 + 0.5) * 255); data[o + 2] = Math.round((nz * 0.5 + 0.5) * 255); data[o + 3] = Math.round(h * 255);
+    data[o] = Math.round((nx * 0.5 + 0.5) * 255); data[o + 1] = Math.round((ny * 0.5 + 0.5) * 255); data[o + 2] = Math.round((nz * 0.5 + 0.5) * 255); data[o + 3] = Math.round(Math.min(1, h) * 255);
   }
   const t = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
@@ -303,30 +317,31 @@ export function createLubeMaterials(maxAniso = 8) {
     sh.uniforms.tPeel = { value: peel };
     sh.uniforms.uAOk = aoK;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aSeal;\nattribute float aAO;\nvarying float vSeal;\nvarying float vAO;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSeal = aSeal; vAO = aAO;');
+      .replace('#include <common>', '#include <common>\nattribute float aSeal;\nattribute float aAO;\nattribute float aCav;\nvarying float vSeal;\nvarying float vAO;\nvarying float vCav;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSeal = aSeal; vAO = aAO; vCav = aCav;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vSeal;\nvarying float vAO;\nuniform sampler2D tPeel;\nuniform float uAOk;')
+      .replace('#include <common>', '#include <common>\nvarying float vSeal;\nvarying float vAO;\nvarying float vCav;\nuniform sampler2D tPeel;\nuniform float uAOk;')
       // the knurl only on the seals; the foil's faint peel everywhere else (vSeal: 0 foil .. 1 seal; 2 a cut edge)
       .replace('#include <normal_fragment_maps>', `
         float sealM = min( vSeal, 1.0 );
         vec4 knT = texture2D( normalMap, vNormalMapUv );
         vec3 knN = knT.xyz * 2.0 - 1.0;
-        vec3 peN = texture2D( tPeel, vNormalMapUv * 0.55 ).xyz * 2.0 - 1.0;
+        vec3 peN = texture2D( tPeel, vNormalMapUv * 1.1 ).xyz * 2.0 - 1.0;
         vec3 mapN = normalize( mix( vec3( peN.xy * 0.22, 1.0 ), knN, sealM ) );
         mapN.xy *= normalScale;
         normal = normalize( tbn * mapN );`)
       // the crimp's grooves a touch darker, its faces a touch more matte; a cut edge the laminate's aluminium
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-        roughnessFactor = mix( min( 1.0, roughnessFactor + 0.12 * min( vSeal, 1.0 ) ), 0.3, step( 1.5, vSeal ) );`)
+        roughnessFactor = mix( min( 1.0, roughnessFactor + 0.1 * min( vSeal, 1.0 ) ), 0.42, step( 1.5, vSeal ) );`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
-        metalnessFactor = mix( metalnessFactor, 1.0, step( 1.5, vSeal ) );`)
+        metalnessFactor = mix( metalnessFactor, 0.8, step( 1.5, vSeal ) );`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        { float knH = texture2D( normalMap, vNormalMapUv ).a; diffuseColor.rgb *= mix( 1.0, 0.92 + 0.1 * knH, min( vSeal, 1.0 ) );
-          diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.66, 0.68, 0.7 ), step( 1.5, vSeal ) ); }`)
+        { float knH = texture2D( normalMap, vNormalMapUv ).a; diffuseColor.rgb *= mix( 1.0, 0.9 + 0.12 * knH, min( vSeal, 1.0 ) );
+          // a cut edge: the laminate's aluminium core, dulled, between its blue faces
+          diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.52, 0.56, 0.6 ), 0.65 * step( 1.5, vSeal ) ); }`)
       // where one sachet lies on another, or on the floor: the light that can't get in there (worked out where they rest)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>
-        { float ao = mix( 1.0, vAO, uAOk );
+        { float ao = mix( 1.0, vAO, uAOk ) * vCav;
           reflectedLight.indirectDiffuse *= ao; reflectedLight.indirectSpecular *= ao;
           reflectedLight.directDiffuse *= mix( 1.0, ao, 0.55 ); reflectedLight.directSpecular *= mix( 1.0, ao, 0.7 );
           #ifdef USE_CLEARCOAT
@@ -337,7 +352,7 @@ export function createLubeMaterials(maxAniso = 8) {
           #endif
         }`);
   };
-  foil.customProgramCacheKey = () => 'lube-foil-2';
+  foil.customProgramCacheKey = () => 'lube-foil-3';
   return { foil, knurl, peel, aoK };
 }
 
@@ -377,14 +392,13 @@ export function buildLube(LM) {
   const group = new THREE.Group(); group.name = 'lube';
   const sachets = [], skins = [];
   for (let i = 0; i < MAX; i++) {
-    const { body, fin } = buildSachetGeometry(i + 1);
-    for (const g of [body, fin]) g.setAttribute('aAO', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count).fill(1), 1));
+    const { body } = buildSachetGeometry(i + 1);
+    for (const g of [body]) g.setAttribute('aAO', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count).fill(1), 1));
     const s = new THREE.Group(); s.name = `sachet-${i}`;
     const m = new THREE.Mesh(body, LM.foil); m.name = 'sachet';
-    const f = new THREE.Mesh(fin, LM.foil); f.name = 'fin';
-    for (const o of [m, f]) { o.castShadow = true; o.receiveShadow = true; }
-    s.add(m, f); group.add(s); sachets.push(s);
-    skins.push([prepSkin(body), prepSkin(fin)]);
+    for (const o of [m]) { o.castShadow = true; o.receiveShadow = true; }
+    s.add(m); group.add(s); sachets.push(s);
+    skins.push([prepSkin(body)]);   // (the back seam is part of the body now)
   }
   // (kept off userData: the floor shadow's stand-in is a clone, and a clone copies userData as JSON)
   Object.defineProperty(group, 'sim', { value: new LubeSim(sachets, skins, LM) });
