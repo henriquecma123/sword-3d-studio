@@ -8,7 +8,7 @@ import { BandsRig } from './bands.js';
 import { createMBandMaterials, buildMBand, poseMBand } from './mband.js';
 import { BLOCK, createBlockMaterials, buildBlock, poseBlock, setBlockFloor } from './yogablock.js';
 import { createBloomMaterials, buildBloom, setBloomFloor, setBloomLight } from './bloompod.js';
-import { createTravelBagMaterials, buildTravelBag } from './travelbag.js';   // the travel bag (offline: travel-bag-offline/)
+import { BAG, createTravelBagMaterials, buildTravelBag } from './travelbag.js';   // the travel bag (offline: travel-bag-offline/)
 import { createLubeMaterials, buildLube } from './lube.js';   // the lubricant sachets, with physics (offline: lube-offline/)
 import { createScaleMaterials, buildScale, setScaleReading } from './scale.js';
 import { BP_PRESETS, createBPMaterials, buildBPMonitor, poseBPMonitor, setBPReading, visibleBox } from './bpmonitor.js';
@@ -337,6 +337,7 @@ function poseLubeStudio() {
   lube.position.set(0, 0, 0); lube.quaternion.identity();
   if (comboOn() && state.lube.arr === 'float' && lubeSim.arr === 'float') lubeSim.arrange('fan', state.lube.count, { settle: true });
   else if (!comboOn() && state.lube.arr === 'float' && lubeSim.arr !== 'float') lubeSim.arrange('float', state.lube.count);
+  if (!comboOn()) lubeObstacles();   // (on their own: nothing but the floor)
   lubeSim.sync();
 }
 
@@ -403,6 +404,9 @@ function snapshotCombo() {
   model.updateMatrixWorld(true);
   for (const d of members()) {
     if (d === 'bands') { if (!comboBase.bands) snapshotBands(); continue; }   // anchored once: re-anchoring on every refresh moved their frame, and the devices jumped into them
+    // the sachets: placed by their group's origin (they move about in it by themselves: a centre taken from where they
+    // lie would carry them off whenever they moved)
+    if (d === 'lube') { comboBase.lube = { parts: [[lube, lube.position.clone(), lube.quaternion.clone()]], c: new THREE.Vector3(), s: new THREE.Vector3(16, 3, 16), pts: [] }; continue; }
     const b = boundsOfDevice(d, true);
     comboBase[d] = { parts: GROUP_OF[d]().map((o) => [o, o.position.clone(), o.quaternion.clone()]), c: b.getCenter(new THREE.Vector3()), s: b.getSize(new THREE.Vector3()), pts: samplePoints(d) };
   }
@@ -497,7 +501,7 @@ function placeCombo() {
   // the pouch is solid: the devices are put down round it, unless it was the last thing moved: then it is the one
   // that gives way (pushed clear of the devices)
   const pouchLast = state.comboStack[state.comboStack.length - 1] === 'bands';
-  settleCombo(ds.filter((d) => d !== 'bands' && comboBase[d]), !pouchLast);
+  settleCombo(ds.filter((d) => d !== 'bands' && d !== 'lube' && comboBase[d]), !pouchLast);   // (the sachets are simulated: the devices are solid to them, below)
   model.updateMatrixWorld(true);
   if (pouchLast && bandsIn() && comboBase.bands) {   // the bands (pouch or loose) just moved: they give way, beside what is there
     const devs = ds.filter((d) => d !== 'bands').flatMap(obbsOf), P = state.comboPos.bands, rig = bandsRig.opts.pouch ? bandsSolid() : looseBandBoxes(true);
@@ -508,6 +512,83 @@ function placeCombo() {
   }
   syncProxy();
   bandsObstacles();
+  lubeObstacles();
+}
+// the devices are solid to the sachets (their boxes, in the sachets' frame); the travel bag is hollow: its walls, its
+// floor and its top, which opens along the zip as far as the slider has gone, as wide as its rows have parted, so a
+// sachet can be dropped in through its mouth. In there, only the light that comes in through the mouth reaches them.
+// Moved, the bag carries what is inside it
+let lubeBagM = null;
+function bagBoxes() {
+  const a = BAG.W / 2, c = BAG.D / 2, top = BAG.H + BAG.bulge.bottom, topOut = top + BAG.bulge.top, r = BAG.Rcrest;
+  const zIn = c - 0.15, zOut = c + BAG.puff, xOut = a + BAG.bulge.end, out = [];
+  const box = (cx, cy, cz, hx, hy, hz, ax = [1, 0, 0, 0, 1, 0, 0, 0, 1]) => out.push({ c: [cx, cy, cz], h: [hx, hy, hz], ax });
+  box(0, -1.25, 0, xOut, 1.75, zOut);                                            // its floor (down into the ground: nothing gets under it)
+  for (const s of [-1, 1]) box(0, top / 2, s * (zIn + zOut) / 2, a, top / 2, (zOut - zIn) / 2);   // front and back
+  for (const s of [-1, 1]) box(s * (a - 0.2 + xOut) / 2, (top - r + 0.6) / 2, 0, (xOut - a + 0.2) / 2, (top - r + 0.6) / 2, zOut);   // its ends
+  for (const s of [-1, 1]) {   // the top's rounded ends: a plate across each
+    const nx = s * Math.SQRT1_2, ny = Math.SQRT1_2, mx = s * (a - r) + nx * r, my = top - r + ny * r;
+    box(mx - nx * 0.5, my - ny * 0.5, 0, r * 0.75, 0.5, zOut, [-ny * s, nx * s, 0, nx, ny, 0, 0, 0, 1].map((v, k) => (k < 3 ? [ny, -nx, 0][k] : v)));
+  }
+  // the top, a centimetre at a time: closed, or two lips either side of the mouth
+  const mouth = (travelbag.userData.mouth?.() || []).filter((m) => m.ny > 0.75), x0 = -(a - r), x1 = a - r, n = Math.ceil(x1 - x0);
+  const seg = [];
+  for (let k = 0; k < n; k++) {
+    const xa = x0 + (k / n) * (x1 - x0), xb = x0 + ((k + 1) / n) * (x1 - x0), xm = (xa + xb) / 2;
+    let g = 0; for (const m of mouth) if (Math.abs(m.x - xm) < 0.6) g = Math.max(g, m.gap);
+    const hg = Math.min(3.3, g / 2), yc = (top - 0.3 + topOut) / 2, hy = (topOut - top + 0.3) / 2;
+    seg.push({ x: xm, hg });
+    if (hg < 0.45) box(xm, yc, 0, (xb - xa) / 2 + 0.02, hy, zOut);
+    else for (const s of [-1, 1]) box(xm, yc - 0.15 * hg, s * (hg + zOut) / 2, (xb - xa) / 2 + 0.02, hy, (zOut - hg) / 2);   // (the lips sag in a little as they part)
+  }
+  return { boxes: out, seg, a, c, top, zOut };
+}
+function lubeObstacles() {
+  if (!lubeSim) return;
+  if (!comboOn() || !members().includes('lube')) { if (lubeSim.obs.length || lubeSim.encl) lubeSim.setObstacles([], null); lubeBagM = null; return; }
+  model.updateMatrixWorld(true);
+  const inv = lube.matrixWorld.clone().invert(), qInv = new THREE.Quaternion().setFromRotationMatrix(inv);
+  const toLocal = (o) => {
+    const c = new THREE.Vector3(...o.c).applyMatrix4(inv), ax = [];
+    for (let k = 0; k < 3; k++) { const v = new THREE.Vector3(o.ax[3 * k], o.ax[3 * k + 1], o.ax[3 * k + 2]).applyQuaternion(qInv); ax.push(v.x, v.y, v.z); }
+    return { c: [c.x, c.y, c.z], ax, h: o.h };
+  };
+  const list = [], keep = new Set();
+  for (const d of members()) if (d !== 'lube' && d !== 'bands' && d !== 'travelbag') list.push(...obbsOf(d).map(toLocal));
+  list.push(...bandsSolid().map(toLocal));
+  const solids = list.slice();   // (what they are pushed out of, if a device is put down on them: the bag as one box, below)
+  const bagOpenNow = () => (travelbag.userData.open || 0) > 0.05;
+  let encl = null;
+  if (members().includes('travelbag')) {
+    const B = bagBoxes(), Mlb = inv.clone().multiply(travelbag.matrixWorld);   // the bag's frame → the sachets'
+    for (const o of B.boxes) {
+      const c = new THREE.Vector3(...o.c).applyMatrix4(Mlb), q = new THREE.Quaternion().setFromRotationMatrix(Mlb), ax = [];
+      for (let k = 0; k < 3; k++) { const v = new THREE.Vector3(o.ax[3 * k], o.ax[3 * k + 1], o.ax[3 * k + 2]).applyQuaternion(q); ax.push(v.x, v.y, v.z); }
+      list.push({ c: [c.x, c.y, c.z], ax, h: o.h });
+    }
+    const toBag = Mlb.clone().invert(), p = new THREE.Vector3();
+    const inBag = (x, y, z, M = toBag) => { p.set(x, y, z).applyMatrix4(M); return Math.abs(p.x) < B.a + 0.3 && p.y < B.top + 0.2 && Math.abs(p.z) < B.c + 0.9; };
+    // what is in it stays in it (moved, it goes with it): only the others are pushed out from under it
+    const was = lubeBagM ? lubeBagM.clone().invert() : toBag;
+    lubeSim.active().forEach((b, i) => { if (inBag(b.position.x, b.position.y, b.position.z, was) && (lubeBagM || bagOpenNow())) keep.add(i); });
+    if (lubeBagM && !lubeBagM.equals(Mlb)) lubeSim.carry(Mlb.clone().multiply(was), (x, y, z) => inBag(x, y, z, was));
+    lubeBagM = Mlb.clone();
+    const ob = new THREE.Box3(new THREE.Vector3(-B.a - BAG.bulge.end, 0, -B.zOut), new THREE.Vector3(B.a + BAG.bulge.end, B.top + BAG.bulge.top, B.zOut)), oc = ob.getCenter(new THREE.Vector3()).applyMatrix4(Mlb), oq = new THREE.Quaternion().setFromRotationMatrix(Mlb), oh = ob.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+    const ax = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)].flatMap((v) => v.applyQuaternion(oq).toArray());
+    solids.push({ c: [oc.x, oc.y, oc.z], ax, h: [oh.x, oh.y, oh.z] });
+    const sm = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    encl = { m: toBag, inside: (x, y, z) => inBag(x, y, z),
+      // (the bag's own frame) inside: dark, but for what comes in through the mouth, less the deeper down
+      light: (x, y, z) => {
+        if (!(Math.abs(x) < B.a - 0.1 && y < B.top - 0.1 && Math.abs(z) < B.c + 0.6)) return 1;
+        const k = Math.max(0, Math.min(ML.length - 1, Math.round((x + B.a) * 4)));
+        return 0.14 + 0.86 * ML[k] * Math.exp(-Math.max(0, B.top - y) / 6);
+      } };
+    // (how open the mouth is above each point along the bag, every 2.5 mm: looked up, not worked out for every vertex)
+    const ML = new Float32Array(Math.ceil(B.a * 8) + 1);
+    for (let k = 0; k < ML.length; k++) { const x = k / 4 - B.a; let m = 0; for (const sg of B.seg) if (sg.hg > 0.45) m = Math.max(m, sm(0.45, 3, sg.hg) * Math.exp(-Math.abs(x - sg.x) / 3.5)); ML[k] = m; }
+  } else lubeBagM = null;
+  lubeSim.setObstacles(list, encl, solids, keep);
 }
 function placeBandsRig() {
   if (!bandsIn() || !comboBase.bands) return;
@@ -800,7 +881,7 @@ function setFloor(fromPose) {
 }
 
 function boundsOfDevice(d, exact = false) {
-  if (!exact && d !== 'bands' && comboOn() && comboBase[d]?.pts?.length && members().includes(d)) return placedBounds(d);   // combined: from its point cloud
+  if (!exact && d !== 'bands' && d !== 'lube' && comboOn() && comboBase[d]?.pts?.length && members().includes(d)) return placedBounds(d);   // combined: from its point cloud
   if (d === 'iphone') { const b = new THREE.Box3().setFromObject(phone); if (phx.group.visible) b.expandByObject(phx.group); return b; }
   if (d === 'box') return new THREE.Box3().setFromObject(box);
   if (d === 'mband') return new THREE.Box3().setFromObject(mband);
@@ -1285,7 +1366,7 @@ function loop() {
   const moving = bandsIn() && bandsRig.step();
   if (moving) { markShadowDirty(); resetShadow(); }
   // the sachets falling, pushed or held: the view and their floor shadow follow; once they rest, a full shadow
-  if (isLube() && !comboOn() && !videoFrames) {
+  if (members().includes('lube') && !videoFrames) {   // (in a combined shot too: the devices solid to them)
     const was = lubeMoving;
     lubeMoving = lubeSim.step();
     if (lubeMoving) { markShadowDirty(); syncProxyParts(); resetShadow(true); }
@@ -1696,7 +1777,7 @@ function syncSetupUI() {
   $('#gl-pose-row').classList.toggle('hidden', !isGluco());
   $('#gl-lean-row').classList.toggle('hidden', !isGluco() || state.glPose !== 'upright');
   $('#tb-open-row').classList.toggle('hidden', !isBag());
-  for (const id of ['lube-count-row', 'lube-arr-row', 'lube-act-row', 'lube-note']) $('#' + id).classList.toggle('hidden', !isLube() || (comboOn() && id !== 'lube-count-row'));
+  for (const id of ['lube-count-row', 'lube-arr-row', 'lube-act-row', 'lube-note']) $('#' + id).classList.toggle('hidden', !isLube() || (comboOn() && (id === 'lube-arr-row' || id === 'lube-act-row')));
   setSeg('lubecount', String(state.lube.count)); setSeg('lubearr', state.lube.arr);
   $('#gl-strip-row').classList.toggle('hidden', !isGluco());
   $('#gl-reading-row').classList.toggle('hidden', !isGluco());
@@ -2279,7 +2360,7 @@ function pickMember(r) {
 stage.addEventListener('pointerdown', (e) => {
   if (!comboOn() || e.button !== 0 || bandDrag || spaceDown) return;
   const hit = pickMember(rayAt(e));
-  if (!hit) return;
+  if (!hit || hit.d === 'lube') return;   // (a sachet: picked up by itself, below)
   e.stopPropagation(); e.preventDefault();
   if (hit.d !== state.device) {   // edit the one clicked (without moving the camera)
     pickedInView = true;
@@ -2338,33 +2419,48 @@ stage.addEventListener('wheel', (e) => {
 let lubeDrag = null;
 function lubeSettled() { poseLubeStudio(); setFloor(true); rebuildShadowProxy(); markShadowDirty(); resetShadow(); updateLights(); requestRender(); }
 stage.addEventListener('pointerdown', (e) => {
-  if (!isLube() || comboOn() || e.button !== 0 || spaceDown) return;
+  if (!members().includes('lube') || e.button !== 0 || spaceDown) return;
+  if (comboOn() && pickMember(rayAt(e))?.d !== 'lube') return;   // (combined: only if a sachet is the nearest thing there)
   const hit = lubeSim.pick(rayAt(e));
   if (!hit) return;
   e.stopPropagation(); e.preventDefault();
-  const floating = state.lube.arr === 'float' && lubeSim.world.gravity.y === 0;
-  // floating: across the view (a plane facing the camera); else held up off the floor (2 cm above where it was taken),
-  // or with ⌥ slid along it
-  const lift = floating || e.altKey ? 0 : 2;
+  lube.updateMatrixWorld(true);
+  const floating = lubeSim.world.gravity.y === 0;
+  // floating: across the view (a plane facing the camera). Else carried: held just clear of whatever is under the
+  // pointer (the floor, a device, the others), so it goes up over the bag and can be lowered in at its mouth; with ⌥,
+  // slid along at the height it was taken
   if (floating) dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), hit.point);
-  else dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), hit.point.clone().setY(hit.point.y + lift));
-  lubeSim.startDrag(hit);
-  lubeDrag = { id: e.pointerId, lift, t0: performance.now(), from: hit.point.clone() };
+  lubeSim.startDrag({ i: hit.i, point: lube.worldToLocal(hit.point.clone()) });
+  lubeDrag = { id: e.pointerId, i: hit.i, floating, slide: e.altKey, H: hit.point.y, from: hit.point.clone() };
   try { stage.setPointerCapture(e.pointerId); } catch { /* gone */ }
   stage.style.cursor = 'grabbing';
 }, { capture: true });
 stage.addEventListener('pointermove', (e) => {
-  if (!isLube() || comboOn()) return;
+  if (!members().includes('lube')) return;
   if (lubeDrag && e.pointerId === lubeDrag.id) {
     e.stopPropagation();
-    if (!rayAt(e).ray.intersectPlane(dragPlane, hitP)) return;
-    // the lift comes in over a fifth of a second (not a jump up)
-    const k = Math.min(1, (performance.now() - lubeDrag.t0) / 200), p = hitP.clone();
-    if (lubeDrag.lift) p.y = lubeDrag.from.y + lubeDrag.lift * k;
+    const r = rayAt(e);
+    let p;
+    if (lubeDrag.floating || lubeDrag.slide) {
+      if (!lubeDrag.floating) dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, lubeDrag.H, 0));
+      if (!r.ray.intersectPlane(dragPlane, hitP)) return;
+      p = lube.worldToLocal(hitP.clone());
+    } else {
+      // carried: over the surface the pointer is on (the floor, a device's top, through the bag's open mouth to what is in
+      // it), its lowest point 1.2 cm above it; the height eased (no jumps)
+      // (under the pointer at the height it is carried at; that height eased towards what clears everything under its
+      // footprint, there and on the way)
+      dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, lubeDrag.H, 0));
+      if (!r.ray.intersectPlane(dragPlane, hitP)) return;
+      const at = lube.worldToLocal(hitP.clone());
+      const reach = Math.max(0.3, lubeDrag.H - lubeSim.lowOf(lubeDrag.i)), want = lubeSim.clearance(lubeDrag.i, at.x, at.z) + 1.2 + reach;
+      lubeDrag.H += (want - lubeDrag.H) * 0.35;
+      p = new THREE.Vector3(at.x, lubeDrag.H, at.z);
+    }
     lubeSim.dragTo(p);
     return;
   }
-  if (e.buttons || spaceDown) return;
+  if (e.buttons || spaceDown || comboOn()) return;   // (combined: the shot's own hover)
   const now = performance.now(); if (now - lubeHoverT < 70) return; lubeHoverT = now;
   renderer.domElement.style.cursor = lubeSim.pick(rayAt(e)) ? 'grab' : '';
 }, { capture: true });
@@ -2379,7 +2475,7 @@ stage.addEventListener('pointercancel', endLubeDrag, { capture: true });
 stage.addEventListener('wheel', (e) => {
   if (!lubeDrag) return;
   e.stopPropagation(); e.preventDefault();
-  lubeSim.turn((e.deltaY > 0 ? -1 : 1) * 10 * DEG);
+  lubeSim.turn((e.deltaY > 0 ? -1 : 1) * 7.5 * DEG);   // (fine enough to line one up with the bag's mouth)
 }, { capture: true, passive: false });
 $('#lube-drop').addEventListener('click', () => { state.lube.arr = 'pile'; setSeg('lubearr', 'pile'); lubeSim.drop(); lubeSettled(); if (!lubeLooked) { lubeLooked = true; frameLube(); } });
 let lubeLooked = false;

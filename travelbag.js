@@ -753,6 +753,13 @@ export function buildTravelBag(M) {
     grp.userData.open = OPEN.t;
   }
   grp.userData.setOpen = setOpen;
+  // the zip's line and how far apart its rows are along it (the bag's own frame: floor at y = 0), for whatever might go
+  // in through the mouth (the lubricant sachets' physics): points every half centimetre, their outward normal, the gap
+  grp.userData.mouth = () => {
+    const out = [];
+    for (let s = 0.25; s < ZIP.L; s += 0.5) { const o = loopAt(ZIP.S0 + s); out.push({ x: o.p[0], y: o.p[1] + inner.position.y, nx: o.n[0], ny: o.n[1], gap: gapAt(ZIP.S0 + s) }); }
+    return out;
+  };
   setOpen(0);
   return grp;
 }

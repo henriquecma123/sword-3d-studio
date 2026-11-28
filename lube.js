@@ -294,9 +294,9 @@ export function createLubeMaterials(maxAniso = 8) {
   const aoK = { value: 1 };   // the contact shading's strength: off while they move (it is worked out where they rest)
   // satin-printed metallised foil: a clear mid blue, a soft sheen (its highlights broad and pale), a touch of metal
   const foil = new THREE.MeshPhysicalMaterial({
-    color: 0x55ade3, roughness: 0.42, metalness: 0.38, specularIntensity: 0.85,
-    sheen: 0.12, sheenColor: 0xcfe6f5, sheenRoughness: 0.5,
-    clearcoat: 0.08, clearcoatRoughness: 0.5,
+    color: 0x55ade3, roughness: 0.48, metalness: 0.34, specularIntensity: 0.8,
+    sheen: 0.16, sheenColor: 0xcfe6f5, sheenRoughness: 0.6,
+    clearcoat: 0.04, clearcoatRoughness: 0.6,   // (a soft satin: its highlights broad, nothing hard or glassy)
     normalMap: knurl, normalScale: new THREE.Vector2(1, 1),
   });
   foil.onBeforeCompile = (sh) => {
@@ -350,10 +350,10 @@ export function createLubeMaterials(maxAniso = 8) {
 const MAX = 3;
 const DEG = Math.PI / 180;
 const G = 981;                   // cm/s²
-const STEP = 1 / 240;
+const STEP = 1 / 360;            // (finer than 1/240: falling into the bag, a sachet went through its 5 mm floor)
 const NS = 49;                   // stations along the length, for the bend
 const DS = SACHET.L / (NS - 1);
-const STIFF = 48;                // EI over the weight per length (cm³): soft, a gel pack: an end 7 cm out would droop about 6 cm
+const STIFF = 30;                // EI over the weight per length (cm³): very soft, a gel pack: it lies into whatever is under it
 const stY = (j) => SACHET.L / 2 - j * DS;                // a station's y in the sachet's own frame (j = 0 the top)
 
 // the second-difference stiffness (D2ᵀD2: free ends), banded: M[j][k - j + 2], k = j-2 .. j+2
@@ -414,14 +414,14 @@ export class LubeSim {
     w.solver.tolerance = 1e-6;
     const mat = new CANNON.Material('foil');
     // (soft: a low contact stiffness and a long relaxation, so they meet with a soft give and no bounce, and a little grip)
-    Object.assign(w.defaultContactMaterial, { friction: 0.42, restitution: 0, contactEquationStiffness: 9e5, contactEquationRelaxation: 7, frictionEquationStiffness: 9e5, frictionEquationRelaxation: 6 });
+    Object.assign(w.defaultContactMaterial, { friction: 0.46, restitution: 0, contactEquationStiffness: 4e5, contactEquationRelaxation: 8, frictionEquationStiffness: 4e5, frictionEquationRelaxation: 7 });
     this.floor = new CANNON.Body({ mass: 0, type: CANNON.Body.STATIC, material: mat });
     this.floor.addShape(new CANNON.Plane());
     this.floor.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
     w.addBody(this.floor);
     // a sachet: the filled body as thick as it is when it rests, its underside flattened (the gel gives: 4.2 mm, not
     // 5.5), its sides round, the head tab and the bottom seal plates at its mid-plane
-    const Th = 0.21, yTop = (LEN / 2 - 19) * MM, yBot = (LEN / 2 - GEL_BOTTOM) * MM, hl = (yTop - yBot) / 2, yc = (yTop + yBot) / 2;
+    const Th = 0.195, yTop = (LEN / 2 - 19) * MM, yBot = (LEN / 2 - GEL_BOTTOM) * MM, hl = (yTop - yBot) / 2, yc = (yTop + yBot) / 2;
     this.bodies = sachets.map(() => {
       const b = new CANNON.Body({ mass: 1, material: mat, linearDamping: 0.16, angularDamping: 0.42, allowSleep: true, sleepSpeedLimit: 0.35, sleepTimeLimit: 0.5 });   // (looser, and one starting to topple slowly went to sleep leaning)
       b.addShape(new CANNON.Box(new CANNON.Vec3(1.32, hl, Th)), new CANNON.Vec3(0, yc, 0));
@@ -442,9 +442,67 @@ export class LubeSim {
     this.jointBody.collisionFilterGroup = 0; this.jointBody.collisionFilterMask = 0;
     w.addBody(this.jointBody);
     this.box = new THREE.Box3();
+    this.obs = []; this.obsBody = null; this.encl = null;
     this.arrange('pile', 3, { settle: true });
   }
   active() { return this.bodies.slice(0, this.count); }
+  // the other devices in a combined shot, solid: boxes { c: [x, y, z], ax: [9: its axes], h: [3] } in this group's frame.
+  // encl: a hollow they can go into (the travel bag): { m: this frame → its frame (Matrix4), light(x, y, z): how much
+  // light gets in there, 0..1 } or null. Anything left inside a box (a device put down on them) is lifted out on top of it
+  setObstacles(list, encl = null, solids = null, keep = new Set()) {   // (solids: the whole shapes to push out of, the bag one box; keep: sachets left where they are, in the bag)
+    if (this.obsBody) { this.world.removeBody(this.obsBody); this.obsBody = null; }
+    this.obs = list.map((o) => ({ r: Math.hypot(...o.h) + 0.3, c: new THREE.Vector3(...o.c), ax: [new THREE.Vector3(o.ax[0], o.ax[1], o.ax[2]), new THREE.Vector3(o.ax[3], o.ax[4], o.ax[5]), new THREE.Vector3(o.ax[6], o.ax[7], o.ax[8])], h: [...o.h] }));
+    this.encl = encl;
+    if (this.obs.length) {
+      const b = this.obsBody = new CANNON.Body({ mass: 0, type: CANNON.Body.STATIC, material: this.floor.material });
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion();
+      for (const o of this.obs) {
+        q.setFromRotationMatrix(m.makeBasis(o.ax[0], o.ax[1], o.ax[2]));
+        b.addShape(new CANNON.Box(new CANNON.Vec3(Math.max(0.05, o.h[0]), Math.max(0.05, o.h[1]), Math.max(0.05, o.h[2]))), new CANNON.Vec3(o.c.x, o.c.y, o.c.z), new CANNON.Quaternion(q.x, q.y, q.z, q.w));
+      }
+      this.world.addBody(b);
+    }
+    // (a device put down where sachets lie: they are pushed out from under it, sideways, the shortest way, as it would
+    // shove them aside; only from under something very low, they end up on it)
+    let moved = false;
+    const S2 = solids ? solids.map((o) => ({ c: new THREE.Vector3(...o.c), ax: [new THREE.Vector3(o.ax[0], o.ax[1], o.ax[2]), new THREE.Vector3(o.ax[3], o.ax[4], o.ax[5]), new THREE.Vector3(o.ax[6], o.ax[7], o.ax[8])], h: [...o.h] })) : this.obs;
+    for (let pass = 0; pass < 6; pass++) for (const [bi, b] of this.active().entries()) {
+      if (keep.has(bi)) continue;
+      const q = new THREE.Quaternion(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w), ex = new THREE.Vector3(1, 0, 0).applyQuaternion(q), ey = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+      for (const o of S2) {
+        const d = new THREE.Vector3(b.position.x, b.position.y, b.position.z).sub(o.c);
+        const l = [d.dot(o.ax[0]), d.dot(o.ax[1]), d.dot(o.ax[2])];
+        if (!(Math.abs(l[0]) < o.h[0] + 0.15 && Math.abs(l[1]) < o.h[1] + 0.15 && Math.abs(l[2]) < o.h[2] + 0.15)) continue;
+        const top = o.c.y + Math.abs(o.ax[0].y) * o.h[0] + Math.abs(o.ax[1].y) * o.h[1] + Math.abs(o.ax[2].y) * o.h[2];
+        let best = null;
+        if (top > 1.5) for (let k = 0; k < 3; k++) {
+          if (Math.abs(o.ax[k].y) > 0.5) continue;   // (sideways only)
+          const dir = o.ax[k].clone().setY(0).normalize().multiplyScalar(Math.sign(l[k]) || 1);
+          const out = o.h[k] - Math.abs(l[k]) + Math.abs(ey.dot(dir)) * SACHET.L / 2 + Math.abs(ex.dot(dir)) * SACHET.W / 2 + 0.6;   // (all of it clear)
+          if (!best || out < best.out) best = { out, dir };
+        }
+        if (best) { b.position.x += best.dir.x * best.out; b.position.z += best.dir.z * best.out; }
+        else b.position.y = top + 0.6;
+        b.velocity.setZero(); b.angularVelocity.setZero(); moved = true;
+      }
+    }
+    for (const b of this.active()) b.wakeUp();
+    if (this.world.gravity.y !== 0) this.wake();
+    return moved;
+  }
+  // carry the sachets inside something that moved (the bag) with it: those for which inside(x, y, z) holds, by the move M
+  carry(M, inside) {
+    const q = new THREE.Quaternion().setFromRotationMatrix(M), p = new THREE.Vector3(), bq = new THREE.Quaternion();
+    let any = false;
+    for (const b of this.active()) {
+      if (!inside(b.position.x, b.position.y, b.position.z)) continue;
+      p.set(b.position.x, b.position.y, b.position.z).applyMatrix4(M); b.position.set(p.x, p.y, p.z);
+      bq.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w).premultiply(q); b.quaternion.set(bq.x, bq.y, bq.z, bq.w);
+      b.velocity.setZero(); b.angularVelocity.setZero(); any = true;
+    }
+    if (any) this.sync(true);
+    return any;
+  }
   setGravity(on) { this.world.gravity.set(0, on ? -G : 0, 0); for (const b of this.bodies) { b.linearDamping = on ? 0.16 : 0.85; b.angularDamping = on ? 0.42 : 0.9; } }   // (a soft pack hardly spins)
   place(i, p, e) {
     const b = this.bodies[i]; _q.setFromEuler(_e.set(e[0], e[1], e[2], 'YXZ'));
@@ -495,7 +553,7 @@ export class LubeSim {
   // a new drop: worked out first out of sight (trying another way if one would end on its edge), then played live from
   // the same start: the simulation runs the same way twice, so it ends as checked
   drop() { this.drops++; this.arrange('pile', this.count, { settle: true }); this.arrange('pile', this.count, { settle: false }); }
-  wake() { this.awake = true; this.last = 0; this.still = 0; this.freeSince = performance.now(); this.LM.aoK.value = 0; }
+  wake() { this.awake = true; this.last = 0; this.still = 0; this.freeSince = performance.now(); }
   // a gel pack doesn't stand on its edge or lean steeply: it slumps onto a face. Turned towards lying flat (whichever face is
   // nearer down) once it has slowed, if it is tilted more than about 21° (lying across others it never tilts more than about 13°)
   slump() {
@@ -503,6 +561,7 @@ export class LubeSim {
     for (let i = 0; i < this.count; i++) {
       const b = this.bodies[i];
       if ((this.drag && this.drag.i === i) || b.sleepState === CANNON.Body.SLEEPING || b.velocity.lengthSquared() > 225) continue;
+      if (this.encl?.inside?.(b.position.x, b.position.y, b.position.z)) continue;   // (in the bag they may lean on its walls)
       const q = b.quaternion, ezx = 2 * (q.x * q.z + q.y * q.w), ezy = 2 * (q.y * q.z - q.x * q.w), ezz = 1 - 2 * (q.x * q.x + q.y * q.y);
       if (Math.abs(ezy) > 0.93) continue;
       // which way: onto the face nearer down; but standing near upright, away from the sachet nearest it (two leaning
@@ -518,11 +577,16 @@ export class LubeSim {
       b.torque.x += -ezz * s * k; b.torque.z += ezx * s * k;
     }
   }
-  tick() { this.slump(); this.world.step(STEP); this.steepT = this.steep() ? (this.steepT || 0) + STEP : 0; }
-  steep() { return this.world.gravity.y !== 0 && this.active().some((b) => { const q = b.quaternion; return Math.abs(2 * (q.y * q.z - q.x * q.w)) < 0.93; }); }
+  tick() {
+    this.slump(); this.world.step(STEP);
+    // a light, flat sachet falls no faster than about 1.8 m/s (the air holds it back): and nothing thin is ever skipped through
+    for (const b of this.active()) { const v2 = b.velocity.lengthSquared(); if (v2 > 32400) b.velocity.scale(180 / Math.sqrt(v2), b.velocity); }
+    this.steepT = this.steep() ? (this.steepT || 0) + STEP : 0;
+  }
+  steep() { return this.world.gravity.y !== 0 && this.active().some((b) => { const q = b.quaternion; return !this.encl?.inside?.(b.position.x, b.position.y, b.position.z) && Math.abs(2 * (q.y * q.z - q.x * q.w)) < 0.93; }); }
   sane() { return this.active().every((b) => Math.abs(b.position.x) < 80 && b.position.y > -5 && b.position.y < 80 && Math.abs(b.position.z) < 80 && b.velocity.lengthSquared() < 4e6); }
   settle() {
-    for (let k = 0; k < 1440; k++) { this.tick(); if (k > 120 && this.active().every((b) => b.sleepState === CANNON.Body.SLEEPING)) { if (!this.steep()) break; for (const b of this.active()) b.wakeUp(); } }
+    for (let k = 0; k < 2160; k++) { this.tick(); if (k > 120 && this.active().every((b) => b.sleepState === CANNON.Body.SLEEPING)) { if (!this.steep()) break; for (const b of this.active()) b.wakeUp(); } }
     if (!this.sane() || (this.arr === 'pile' && this.steep() && (this.retry = (this.retry || 0) + 1) < 6)) { this.drops++; return this.arrange(this.arr, this.count, { settle: true }); }
     this.retry = 0;
     this.rest();
@@ -541,6 +605,56 @@ export class LubeSim {
     }
     return out;
   }
+  // the top of whatever is under (x, z) in this frame: the floor, a device, another sachet (not skip)
+  surfaceBelow(x, z, skip = -1) {
+    let top = 0;
+    const boxes = this.obs.slice();
+    for (let k = 0; k < this.count; k++) if (k !== skip) boxes.push(...this.stationBoxes(k));
+    for (const o of boxes) {
+      const px = x - o.c.x, py = 300 - o.c.y, pz = z - o.c.z;
+      let t0 = 0, t1 = 1e9, hit = true;
+      for (let k = 0; k < 3; k++) {
+        const a = o.ax[k], p = px * a.x + py * a.y + pz * a.z, v = -a.y, h2 = o.h[k];
+        if (Math.abs(v) < 1e-9) { if (Math.abs(p) > h2) { hit = false; break; } continue; }
+        let ta = (-h2 - p) / v, tb = (h2 - p) / v; if (ta > tb) { const t = ta; ta = tb; tb = t; }
+        if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) { hit = false; break; }
+      }
+      if (hit) top = Math.max(top, 300 - t0);
+    }
+    return top;
+  }
+  // where a ray (this frame) first meets anything here: the floor, a device, a sachet (not skip). null if nothing
+  rayHit(o, d, skip = -1) {
+    let best = d.y < -1e-6 ? -o.y / d.y : Infinity;
+    const boxes = this.obs.slice();
+    for (let k = 0; k < this.count; k++) if (k !== skip) boxes.push(...this.stationBoxes(k));
+    for (const b of boxes) {
+      const px = o.x - b.c.x, py = o.y - b.c.y, pz = o.z - b.c.z;
+      let t0 = 0, t1 = best, hit = true;
+      for (let k = 0; k < 3; k++) {
+        const a = b.ax[k], p = px * a.x + py * a.y + pz * a.z, v = d.x * a.x + d.y * a.y + d.z * a.z, h2 = b.h[k];
+        if (Math.abs(v) < 1e-9) { if (Math.abs(p) > h2) { hit = false; break; } continue; }
+        let ta = (-h2 - p) / v, tb = (h2 - p) / v; if (ta > tb) { const t = ta; ta = tb; tb = t; }
+        if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) { hit = false; break; }
+      }
+      if (hit && t0 < best) best = t0;
+    }
+    return Number.isFinite(best) ? o.clone().addScaledVector(d, best) : null;
+  }
+  // how high a held sachet must be carried, to its target (x, z) from where it is: over everything under its footprint
+  // (its length and width as it is turned now) there and along the way; at the open mouth, lined up, that is the inside
+  clearance(i, tx, tz) {
+    const q = this.bodies[i].quaternion, ax = 2 * (q.x * q.y - q.z * q.w), az = 2 * (q.y * q.z + q.x * q.w), l = Math.hypot(ax, az) || 1;
+    const ux = ax / l, uz = az / l, f = Math.min(1, l), half = 6.6 * f + 0.4;   // (hanging steeply, it covers less)
+    const foot = (cx, cz) => { let top = 0; for (const s of [-1, -0.5, 0, 0.5, 1]) for (const w of [-1.7, 0, 1.7]) top = Math.max(top, this.surfaceBelow(cx + ux * s * half - uz * w, cz + uz * s * half + ux * w, i)); return top; };
+    const b = this.bodies[i].position;
+    let need = foot(tx, tz);
+    for (let k = 1; k < 6; k++) need = Math.max(need, foot(b.x + (tx - b.x) * (k / 6), b.z + (tz - b.z) * (k / 6)));
+    return need;
+  }
+  lowOf(i) { const s = this.sachets[i]; s.updateMatrix(); let low = Infinity; for (const m of s.children) low = Math.min(low, m.geometry.boundingBox.clone().applyMatrix4(s.matrix).min.y); return low; }
+  // the device boxes near a sachet (within reach of it)
+  obsNear(i, reach = 9) { const p = this.bodies[i].position; return this.obs.filter((o) => o.c.distanceTo(new THREE.Vector3(p.x, p.y, p.z)) < reach + Math.hypot(...o.h)); }
   // how far each station can sag (along d) before it touches the floor or a sachet already worked out
   drape(i, others, sweeps) {
     const b = this.bodies[i], B = this.bend[i], q = new THREE.Quaternion(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
@@ -552,14 +666,14 @@ export class LubeSim {
     const P = new THREE.Vector3();
     let minFree = Infinity;
     for (let j = 0; j < NS; j++) {
-      let f = 2.5;
+      let f = 1.8;   // (at most: a gel pack bridging a gap sags, but not into a hammock)
       for (const [x, h] of ACROSS[j].pts) {
         P.copy(b.position).addScaledVector(ex, x).addScaledVector(ey, stY(j)).addScaledVector(ez, down * h);
         if (d.y < -0.05) f = Math.min(f, Math.max(0, P.y / -d.y));   // the floor
         for (const o of others) {
           // the ray along d against the station box (slabs)
           const rx = P.x - o.c.x, ry = P.y - o.c.y, rz = P.z - o.c.z;
-          if (rx * rx + ry * ry + rz * rz > (f + 2.6) * (f + 2.6)) continue;
+          const rr = f + (o.r || 2.6); if (rx * rx + ry * ry + rz * rz > rr * rr) continue;
           let t0 = 0, t1 = f, hit = true;
           for (let k = 0; k < 3; k++) {
             const a = o.ax[k], p = rx * a.x + ry * a.y + rz * a.z, v = d.x * a.x + d.y * a.y + d.z * a.z, h2 = o.h[k];
@@ -573,7 +687,7 @@ export class LubeSim {
       B.free[j] = f; minFree = Math.min(minFree, f);
     }
     // touching nothing (held, or falling): straight
-    if (minFree > 0.08) { if (B.on) { B.u.fill(0); B.on = false; } return; }
+    if (minFree > 0.25) { if (B.on) { B.u.fill(0); B.on = false; } return; }   // (resting on its seals' plates, 2 mm proud of the seals, reads 0.2)
     // the sag: least bending energy under its weight, never past what's free below (projected Gauss-Seidel, SOR)
     const c = (g * DS ** 4) / STIFF, u = B.u, free = B.free;
     for (let j = 0; j < NS; j++) if (u[j] > free[j]) u[j] = free[j];
@@ -589,7 +703,7 @@ export class LubeSim {
   }
   // the bend applied to a sachet's meshes (its own frame: its faces moved along their normal, their normals tipped)
   bendMesh(i) {
-    const B = this.bend[i], u = B.u, s = B.s, fr = B.free, pr = B.press, ZC = 0.205;
+    const B = this.bend[i], u = B.u, s = B.s, fr = B.free, pr = B.press, ZC = 0.19;
     for (const S of this.skins[i]) {
       const P = S.geo.attributes.position.array, N = S.geo.attributes.normal.array, R0 = S.rest, N0 = S.restN, n = P.length / 3;
       let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
@@ -604,7 +718,7 @@ export class LubeSim {
         if (az > 0.1) {
           const ct = 1 - Math.min(1, (fr[j] * (1 - f) + fr[j + 1] * f) / 0.05), pj = pr[j] * (1 - f) + pr[j + 1] * f;
           if (z * s > 0) { if (ct > 0 && az > ZC) z = Math.sign(z) * (ZC + (az - ZC) * (1 - 0.75 * ct)); }
-          else z = Math.sign(z) * (az + 0.34 * Math.max(0, az - ZC) * ct - pj * 0.3 * Math.max(0, az - 0.06));
+          else z = Math.sign(z) * (az + 0.45 * Math.max(0, az - ZC) * ct - pj * 0.42 * Math.max(0, az - 0.06));
         }
         const X = R0[3 * v], Y = R0[3 * v + 1], Z = z + s * uj;
         P[3 * v] = X; P[3 * v + 1] = Y; P[3 * v + 2] = Z;
@@ -627,7 +741,7 @@ export class LubeSim {
       const moving = b.sleepState !== CANNON.Body.SLEEPING || atRest || this.bend[i].shown < 0;
       if (moving) {
         const before = this.bend[i].u.slice(), wasOn = this.bend[i].on;
-        this.drape(i, done.flat(), atRest ? 1400 : 220);
+        this.drape(i, done.flat().concat(this.obsNear(i)), atRest ? 1400 : 220);
         let ch = wasOn !== this.bend[i].on; for (let j = 0; j < NS && !ch; j++) if (Math.abs(before[j] - this.bend[i].u[j]) > 2e-4) ch = true;
         if (ch || this.bend[i].shown < 0) redo.add(i);
       }
@@ -667,52 +781,74 @@ export class LubeSim {
     const box = this.box.makeEmpty();
     for (let i = 0; i < this.count; i++) { this.sachets[i].updateMatrixWorld(true); for (const m of this.sachets[i].children) box.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrix.clone().premultiply(this.sachets[i].matrix))); }
     if (atRest) this.contactShade();
+    else { const mv = this.active().map((b, i) => (b.sleepState !== CANNON.Body.SLEEPING || this.drag?.i === i ? i : -1)).filter((i) => i >= 0); if (mv.length) this.contactShade(mv); }
   }
   // contact shading: how near each point comes to the other sachets (as they lie, bent) and the floor: the light that
   // can't get in there. Worked out at rest; off while they move
-  contactShade() {
+  contactShade(only = null) {   // (only: those sachets, the cheap way: floor, devices and the bag's light, not each other)
     // each other sachet in its own frame: a point's place along it gives the few stations near it straight away
     const fr = [];
     for (let i = 0; i < this.count; i++) {
       const b = this.bodies[i], q = new THREE.Quaternion(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w), e = new THREE.Matrix4().makeRotationFromQuaternion(q).elements;
       fr.push({ p: b.position, e, s: this.bend[i].s, u: this.bend[i].on ? this.bend[i].u : null });
     }
-    const floorOn = this.world.gravity.y !== 0;
+    const floorOn = this.world.gravity.y !== 0, E = this.encl, em = E ? E.m.elements : null;
     for (let i = 0; i < this.count; i++) {
+      if (only && !only.includes(i)) continue;
       const mw = _m.compose(this.sachets[i].position, this.sachets[i].quaternion, new THREE.Vector3(1, 1, 1)), e = mw.elements;
-      const others = fr.filter((_, k) => k !== i);
+      const others = only ? [] : fr.filter((_, k) => k !== i);
+      const obs = only ? [] : this.obsNear(i, 8.5);   // (moving: the floor and the bag's light only, coarser)
+      const shade = (P, v) => {
+        const X = P[3 * v], Y = P[3 * v + 1], Z = P[3 * v + 2];
+        const x = e[0] * X + e[4] * Y + e[8] * Z + e[12], y = e[1] * X + e[5] * Y + e[9] * Z + e[13], z = e[2] * X + e[6] * Y + e[10] * Z + e[14];
+        let ao = 1;
+        if (floorOn && y < 0.5) ao *= 1 - 0.42 * Math.exp(-Math.max(0, y) / 0.1);
+        for (const o of others) {
+          const dx = x - o.p.x, dy = y - o.p.y, dz = z - o.p.z, R = o.e;
+          const lx = R[0] * dx + R[1] * dy + R[2] * dz, ly = R[4] * dx + R[5] * dy + R[6] * dz, lz = R[8] * dx + R[9] * dy + R[10] * dz;
+          if (Math.abs(lx) > 2.6 || Math.abs(ly) > SACHET.L / 2 + 0.6 || Math.abs(lz) > 1.2) continue;
+          const j0 = Math.round((SACHET.L / 2 - ly) / DS);
+          for (let j = Math.max(0, j0 - 2); j <= Math.min(NS - 1, j0 + 2); j++) {
+            const A2 = ACROSS[j], cz = o.u ? o.s * o.u[j] : 0;
+            const a = Math.abs(lx) - A2.hw, b = Math.abs(ly - stY(j)) - DS / 2, c = Math.abs(lz - cz) - A2.th;
+            const d = Math.hypot(Math.max(a, 0), Math.max(b, 0), Math.max(c, 0));
+            if (d < 0.6) ao *= 1 - 0.2 * Math.exp(-d / 0.14);   // (each station a little; the ones about it add up)
+          }
+        }
+        for (const o of obs) {   // a device's side or top close by
+          const dx = x - o.c.x, dy = y - o.c.y, dz = z - o.c.z;
+          if (dx * dx + dy * dy + dz * dz > (o.r + 1.2) * (o.r + 1.2)) continue;
+          const a = Math.abs(dx * o.ax[0].x + dy * o.ax[0].y + dz * o.ax[0].z) - o.h[0], b = Math.abs(dx * o.ax[1].x + dy * o.ax[1].y + dz * o.ax[1].z) - o.h[1], c = Math.abs(dx * o.ax[2].x + dy * o.ax[2].y + dz * o.ax[2].z) - o.h[2];
+          const d = Math.hypot(Math.max(a, 0), Math.max(b, 0), Math.max(c, 0));
+          if (d < 1.2) ao *= 1 - 0.38 * Math.exp(-d / 0.3);
+        }
+        if (E) {   // in the bag: only the light that gets in through its mouth
+          const bx = em[0] * x + em[4] * y + em[8] * z + em[12], by = em[1] * x + em[5] * y + em[9] * z + em[13], bz = em[2] * x + em[6] * y + em[10] * z + em[14];
+          ao *= E.light(bx, by, bz);
+        }
+        return Math.max(0.12, ao);
+      };
       for (const S of this.skins[i]) {
         const P = S.geo.attributes.position.array, A = S.geo.attributes.aAO.array, n = P.length / 3, gr = S.grid;
-        // on the front and back grids, every other row and column (it is smooth), the rest filled in after
-        const skip = (v) => { if (!gr || v >= 2 * gr.nr * gr.nc) return false; const w = v % (gr.nr * gr.nc), r = Math.floor(w / gr.nc), c = w % gr.nc; return (r & 1 && r !== gr.nr - 1) || (c & 1 && c !== gr.nc - 1); };
-        for (let v = 0; v < n; v++) {
-          if (skip(v)) continue;
-          const X = P[3 * v], Y = P[3 * v + 1], Z = P[3 * v + 2];
-          const x = e[0] * X + e[4] * Y + e[8] * Z + e[12], y = e[1] * X + e[5] * Y + e[9] * Z + e[13], z = e[2] * X + e[6] * Y + e[10] * Z + e[14];
-          let ao = 1;
-          if (floorOn && y < 0.5) ao *= 1 - 0.42 * Math.exp(-Math.max(0, y) / 0.1);
-          for (const o of others) {
-            const dx = x - o.p.x, dy = y - o.p.y, dz = z - o.p.z, E = o.e;
-            const lx = E[0] * dx + E[1] * dy + E[2] * dz, ly = E[4] * dx + E[5] * dy + E[6] * dz, lz = E[8] * dx + E[9] * dy + E[10] * dz;
-            if (Math.abs(lx) > 2.6 || Math.abs(ly) > SACHET.L / 2 + 0.6 || Math.abs(lz) > 1.2) continue;
-            const j0 = Math.round((SACHET.L / 2 - ly) / DS);
-            for (let j = Math.max(0, j0 - 2); j <= Math.min(NS - 1, j0 + 2); j++) {
-              const A2 = ACROSS[j], cz = o.u ? o.s * o.u[j] : 0;
-              const a = Math.abs(lx) - A2.hw, b = Math.abs(ly - stY(j)) - DS / 2, c = Math.abs(lz - cz) - A2.th;
-              const d = Math.hypot(Math.max(a, 0), Math.max(b, 0), Math.max(c, 0));
-              if (d < 0.6) ao *= 1 - 0.2 * Math.exp(-d / 0.14);   // (each station a little; the ones about it add up)
+        if (!gr) { for (let v = 0; v < n; v++) A[v] = shade(P, v); }
+        else {
+          // the front and back grids: every st-th row and column (it is smooth), filled in between; the edge round them all
+          const st = only ? 4 : 2, sel = (n2) => { const o = []; for (let k = 0; k < n2; k += st) o.push(k); if (o[o.length - 1] !== n2 - 1) o.push(n2 - 1); return o; };
+          const R = sel(gr.nr), C = sel(gr.nc), nn = gr.nr * gr.nc;
+          for (let f = 0; f < 2; f++) {
+            const o = f * nn;
+            for (const r of R) for (const c of C) A[o + r * gr.nc + c] = shade(P, o + r * gr.nc + c);
+            for (let ri = 0; ri < R.length; ri++) for (let ci = 0; ci < C.length; ci++) {   // the cells between
+              const r0 = R[ri], r1 = R[Math.min(ri + 1, R.length - 1)], c0 = C[ci], c1 = C[Math.min(ci + 1, C.length - 1)];
+              const a00 = A[o + r0 * gr.nc + c0], a01 = A[o + r0 * gr.nc + c1], a10 = A[o + r1 * gr.nc + c0], a11 = A[o + r1 * gr.nc + c1];
+              for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+                if ((r === r0 || r === r1) && (c === c0 || c === c1)) continue;
+                const tr = r1 > r0 ? (r - r0) / (r1 - r0) : 0, tc = c1 > c0 ? (c - c0) / (c1 - c0) : 0;
+                A[o + r * gr.nc + c] = (a00 * (1 - tc) + a01 * tc) * (1 - tr) + (a10 * (1 - tc) + a11 * tc) * tr;
+              }
             }
           }
-          A[v] = Math.max(0.3, ao);
-        }
-        if (gr) for (let f = 0; f < 2; f++) {
-          const o = f * gr.nr * gr.nc, at = (r, c) => A[o + r * gr.nc + c];
-          for (let r = 0; r < gr.nr; r++) for (let c = 0; c < gr.nc; c++) {
-            const ro = r & 1 && r !== gr.nr - 1, co = c & 1 && c !== gr.nc - 1;
-            if (!ro && !co) continue;
-            const r0 = ro ? r - 1 : r, r1 = ro ? r + 1 : r, c0 = co ? c - 1 : c, c1 = co ? c + 1 : c;
-            A[o + r * gr.nc + c] = (at(r0, c0) + at(r0, c1) + at(r1, c0) + at(r1, c1)) / 4;
-          }
+          for (let v = 2 * nn; v < n; v++) A[v] = shade(P, v);
         }
         S.geo.attributes.aAO.needsUpdate = true;
       }
@@ -727,7 +863,7 @@ export class LubeSim {
     if (!this.awake && !this.drag) return false;
     this.acc += dt;
     let n = 0;
-    while (this.acc >= STEP && n < 14) { this.tick(); this.acc -= STEP; n++; }
+    while (this.acc >= STEP && n < 20) { this.tick(); this.acc -= STEP; n++; }
     if (this.acc > STEP) this.acc = 0;
     if (!this.sane()) { this.endDrag(false); this.drops++; this.arrange(this.arr, this.count, { settle: true }); return true; }
     // at rest: nothing faster than about a centimetre a second for a few frames (stacked boxes never quite stop
@@ -754,7 +890,7 @@ export class LubeSim {
     const local = b.quaternion.inverse().vmult(new CANNON.Vec3(point.x - b.position.x, point.y - b.position.y, point.z - b.position.z));
     this.jointBody.position.set(point.x, point.y, point.z);
     // (a gentle hand: it follows a touch behind, and pushes the others aside softly)
-    const c = new CANNON.PointToPointConstraint(b, local, this.jointBody, new CANNON.Vec3(0, 0, 0), 1.1e4);
+    const c = new CANNON.PointToPointConstraint(b, local, this.jointBody, new CANNON.Vec3(0, 0, 0), 8e3);
     this.world.addConstraint(c);
     b.angularDamping = 0.85; b.linearDamping = 0.5;
     for (const o of this.active()) o.wakeUp();
@@ -802,7 +938,7 @@ export class LubeSim {
       for (let i = 0; i < n; i++) this.place(i, [(R() - 0.5) * 3, 9 + i * 5, (R() - 0.5) * 3], [-90 * DEG + (R() - 0.5) * 30 * DEG, R() * Math.PI * 2, (R() - 0.5) * 26 * DEG]);
       const steps = Math.ceil(dur / STEP);
       for (let k = 0; k <= steps; k++) {
-        if (k % 2 === 0) frames.push(this.active().map((b) => [b.position.x, b.position.y, b.position.z, b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w]));
+        if (k % 3 === 0) frames.push(this.active().map((b) => [b.position.x, b.position.y, b.position.z, b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w]));
         this.tick();
       }
       end = { ...this.save(), arr: 'pile' };
@@ -814,7 +950,6 @@ export class LubeSim {
   // one recorded frame shown (bodies set to it, the meshes bent; the contact shading only on the last)
   showFrame(pose, last = false) {
     this.active().forEach((b, k) => { const p = pose[k]; b.position.set(p[0], p[1], p[2]); b.quaternion.set(p[3], p[4], p[5], p[6]); b.wakeUp(); });
-    this.LM.aoK.value = last ? 1 : 0;
     this.sync(last);
   }
 }
